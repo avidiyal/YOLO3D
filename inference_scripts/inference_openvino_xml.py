@@ -13,7 +13,7 @@ import cv2
 import torch
 
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[0]  # YOLOv5 root directory
+ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
@@ -34,6 +34,11 @@ from library.Math import *
 from library.Plotting import *
 from script import Model, ClassAverages
 from script.Model import ResNet, ResNet18, VGG11
+import openvino as ov
+from openvino.runtime import Core 
+
+core = ov.Core()
+
 
 # model factory to choose model
 model_factory = {
@@ -68,12 +73,14 @@ def detect3d(
 
     # load model
     base_model = model_factory[model_select]
-    regressor = regressor_factory[model_select](model=base_model).to('cpu')#.cuda()
+    regressor = regressor_factory[model_select](model=base_model).to('cpu')
 
     # load weight
-    checkpoint = torch.load(reg_weights, map_location='cpu')
-    regressor.load_state_dict(checkpoint['model_state_dict'])
-    regressor.eval()
+    # checkpoint = torch.load(reg_weights, map_location='cpu')
+    # regressor.load_state_dict(checkpoint['model_state_dict'])
+    # regressor.eval()
+    regressor_model = core.read_model(reg_weights)
+    compiled_regressor = core.compile_model(regressor_model, "CPU")
 
     averages = ClassAverages.ClassAverages()
     angle_bins = generate_bins(2)
@@ -85,9 +92,9 @@ def detect3d(
         
         # Run detection 2d
         dets = detect2d(
-            weights='yolov5s.pt',
+            weights='../weights/model_conversion/yolov5s.xml',
             source=img_path,
-            data='data/coco128.yaml',
+            data='../data/coco128.yaml',
             imgsz=[640, 640],
             device='cpu',
             classes=[0, 2, 3, 5]
@@ -111,10 +118,15 @@ def detect3d(
             input_tensor[0,:,:,:] = input_img
 
             # predict orient, conf, and dim
-            [orient, conf, dim] = regressor(input_tensor)
-            orient = orient.cpu().data.numpy()[0, :, :]
-            conf = conf.cpu().data.numpy()[0, :]
-            dim = dim.cpu().data.numpy()[0, :]
+            results = compiled_regressor(input_tensor.numpy())
+            orient = results[compiled_regressor.output(0)]
+            conf = results[compiled_regressor.output(1)]
+            dim = results[compiled_regressor.output(2)]
+
+            # No need for .cpu().data.numpy() - already NumPy arrays
+            orient = orient[0, :, :]  
+            conf = conf[0, :]
+            dim = dim[0, :]
 
             dim += averages.get_item(detected_class)
 
@@ -167,6 +179,14 @@ def detect2d(
 
     # Run inference
     model.warmup(imgsz=(1, 3, *imgsz), half=False)  # warmup
+
+    model_new = core.read_model(weights)  # Assuming weights is the path to the ONNX model
+    print("ONNX model read successfully by OpenVINO")
+
+    # # # Compile the model
+    compiled_model = core.compile_model(model_new, "CPU")
+    print("Model compiled successfully with OpenVINO")
+
     dt, seen = [0.0, 0.0, 0.0], 0
     for path, im, im0s, vid_cap, s in dataset:
         t1 = time_sync()
@@ -178,10 +198,15 @@ def detect2d(
         t2 = time_sync()
         dt[0] += t2 - t1
 
+        results = compiled_model(im.numpy())  # Inference with OpenVINO
         # Inference
-        pred = model(im, augment=False, visualize=False)
+        # pred = model(im, augment=False, visualize=False)
+        # pred = compiled_model(im.numpy())  # Inference with OpenVINO
         t3 = time_sync()
         dt[1] += t3 - t2
+
+        pred = results[compiled_model.output(0)]  # Access the first output
+        pred = torch.tensor(pred)
 
         # NMS
         pred = non_max_suppression(prediction=pred, classes=classes)
@@ -251,14 +276,14 @@ def plot3d(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.xml', help='model path(s)')
     parser.add_argument('--source', type=str, default=ROOT / 'eval/image_2', help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
+    parser.add_argument('--data', type=str, default=ROOT / '../data/coco128.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--classes', default=[0, 2, 3, 5], nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
-    parser.add_argument('--reg_weights', type=str, default='weights/resnet18.pkl', help='Regressor model weights')
-    parser.add_argument('--model_select', type=str, default='resnet18', help='Regressor model list: resnet, vgg, eff')
+    parser.add_argument('--reg_weights', type=str, default='../weights/model_conversion/resnet18.xml', help='Regressor model weights')
+    parser.add_argument('--model_select', type=str, default='resnet', help='Regressor model list: resnet, vgg, eff')
     parser.add_argument('--calib_file', type=str, default=ROOT / 'eval/camera_cal/calib_cam_to_cam.txt', help='Calibration file or path')
     parser.add_argument('--show_result', action='store_true', help='Show Results with imshow')
     parser.add_argument('--save_result', action='store_true', help='Save result')

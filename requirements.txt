@@ -23,3 +23,8 @@ pandas>=1.1.4
 seaborn>=0.11.0
 
 thop  # FLOPs computation
+#added
+torchvision
+onnx
+onnxruntime
+openvino-dev

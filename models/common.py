@@ -330,10 +330,13 @@ class DetectMultiBackend(nn.Module):
         elif xml:  # OpenVINO
             LOGGER.info(f'Loading {w} for OpenVINO inference...')
             check_requirements(('openvino-dev',))  # requires openvino-dev: https://pypi.org/project/openvino-dev/
-            import openvino.inference_engine as ie
-            core = ie.IECore()
-            network = core.read_network(model=w, weights=Path(w).with_suffix('.bin'))  # *.xml, *.bin paths
-            executable_network = core.load_network(network, device_name='CPU', num_requests=1)
+            # import openvino.inference_engine as ie
+            # core = ie.IECore()
+            from openvino.runtime import Core
+            core = Core()
+            network = core.read_model(model=w, weights=Path(w).with_suffix('.bin'))  # *.xml, *.bin paths
+            executable_network = core.compile_model(network, device_name='CPU')
+            LOGGER.info("Model compiled successfully with OpenVINO.")
         elif engine:  # TensorRT
             LOGGER.info(f'Loading {w} for TensorRT inference...')
             import tensorrt as trt  # https://developer.nvidia.com/nvidia-tensorrt-download

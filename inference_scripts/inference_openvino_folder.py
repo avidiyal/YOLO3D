@@ -26,7 +26,7 @@ from utils.torch_utils import select_device, time_sync
 import torch
 import torch.nn as nn
 from torchvision.models import resnet18, vgg11
-
+import openvino.torch
 import numpy as np
 
 from script.Dataset import generate_bins, DetectedObject
@@ -34,6 +34,7 @@ from library.Math import *
 from library.Plotting import *
 from script import Model, ClassAverages
 from script.Model import ResNet, ResNet18, VGG11
+import random
 
 # model factory to choose model
 model_factory = {
@@ -66,9 +67,13 @@ def detect3d(
     imgs_path = sorted(glob.glob(str(source) + '/*'))
     calib = str(calib_file)
 
+    # Randomly select 10 images if there are more than 10
+    if len(imgs_path) > 10:
+        imgs_path = random.sample(imgs_path, 10)
+
     # load model
     base_model = model_factory[model_select]
-    regressor = regressor_factory[model_select](model=base_model).to('cpu')#.cuda()
+    regressor = regressor_factory[model_select](model=base_model).to('cpu')
 
     # load weight
     checkpoint = torch.load(reg_weights, map_location='cpu')
@@ -90,7 +95,7 @@ def detect3d(
             data='data/coco128.yaml',
             imgsz=[640, 640],
             device='cpu',
-            classes=[0, 2, 3, 5]
+            classes=None
         )
 
         for det in dets:
@@ -147,7 +152,7 @@ def detect2d(
     data,
     imgsz,
     device,
-    classes
+    classes=None
     ):
 
     # array for boundingbox detection
@@ -165,6 +170,7 @@ def detect2d(
     # Dataloader
     dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
 
+    model = torch.compile(model, backend="openvino", options={"device": "CPU"})
     # Run inference
     model.warmup(imgsz=(1, 3, *imgsz), half=False)  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0
@@ -257,10 +263,10 @@ def parse_opt():
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--classes', default=[0, 2, 3, 5], nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
-    parser.add_argument('--reg_weights', type=str, default='weights/resnet18.pkl', help='Regressor model weights')
-    parser.add_argument('--model_select', type=str, default='resnet18', help='Regressor model list: resnet, vgg, eff')
+    parser.add_argument('--reg_weights', type=str, default='weights/epoch_10.pkl', help='Regressor model weights')
+    parser.add_argument('--model_select', type=str, default='resnet', help='Regressor model list: resnet, vgg, eff')
     parser.add_argument('--calib_file', type=str, default=ROOT / 'eval/camera_cal/calib_cam_to_cam.txt', help='Calibration file or path')
-    parser.add_argument('--show_result', action='store_true', help='Show Results with imshow')
+    parser.add_argument('--show_result', action='store_false', help='Show Results with imshow')
     parser.add_argument('--save_result', action='store_true', help='Save result')
     parser.add_argument('--output_path', type=str, default=ROOT / 'output', help='Save output pat')
 

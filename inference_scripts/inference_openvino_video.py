@@ -11,6 +11,9 @@ import glob
 
 import cv2
 import torch
+import numpy as np
+from collections import deque
+from torchvision.models import resnet18, vgg11
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -23,19 +26,13 @@ from utils.datasets import LoadImages
 from utils.general import LOGGER, check_img_size, check_requirements, non_max_suppression, print_args, scale_coords
 from utils.torch_utils import select_device, time_sync
 
-import torch
-import torch.nn as nn
-from torchvision.models import resnet18, vgg11
-
-import numpy as np
-
 from script.Dataset import generate_bins, DetectedObject
 from library.Math import *
 from library.Plotting import *
 from script import Model, ClassAverages
 from script.Model import ResNet, ResNet18, VGG11
 
-# model factory to choose model
+# Model factory to choose model
 model_factory = {
     'resnet': resnet18(pretrained=True),
     'resnet18': resnet18(pretrained=True),
@@ -52,6 +49,8 @@ class Bbox:
         self.box_2d = box_2d
         self.detected_class = class_
 
+tracking_trajectories = {}
+
 def detect3d(
     reg_weights,
     model_select,
@@ -62,15 +61,15 @@ def detect3d(
     output_path
     ):
 
-    # Directory
-    imgs_path = sorted(glob.glob(str(source) + '/*'))
+    # Directory or video file
+    imgs_path = [source] if source.endswith(('.mp4', '.avi', '.mov')) else sorted(glob.glob(str(source) + '/*'))
     calib = str(calib_file)
 
-    # load model
+    # Load model
     base_model = model_factory[model_select]
-    regressor = regressor_factory[model_select](model=base_model).to('cpu')#.cuda()
+    regressor = regressor_factory[model_select](model=base_model).to('cpu')
 
-    # load weight
+    # Load weight
     checkpoint = torch.load(reg_weights, map_location='cpu')
     regressor.load_state_dict(checkpoint['model_state_dict'])
     regressor.eval()
@@ -78,93 +77,119 @@ def detect3d(
     averages = ClassAverages.ClassAverages()
     angle_bins = generate_bins(2)
 
-    # loop images
+    # Initialize VideoWriter if saving result
+    if save_result and output_path is not None:
+        os.makedirs(output_path, exist_ok=True)
+        video_path = os.path.join(output_path, 'output_video_1122west.mp4')
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec
+        out = None
+
+    # Loop images or video frames
     for i, img_path in enumerate(imgs_path):
-        # read image
-        img = cv2.imread(img_path)
-        
-        # Run detection 2d
-        dets = detect2d(
-            weights='yolov5s.pt',
-            source=img_path,
-            data='data/coco128.yaml',
-            imgsz=[640, 640],
-            device='cpu',
-            classes=[0, 2, 3, 5]
-        )
+        # Read image or video frame
+        if img_path.endswith(('.mp4', '.avi', '.mov')):
+            if not os.path.exists(img_path):
+                raise FileNotFoundError(f"Video file not found: {img_path}")
 
-        for det in dets:
-            if not averages.recognized_class(det.detected_class):
-                continue
-            try: 
-                detectedObject = DetectedObject(img, det.detected_class, det.box_2d, calib)
-            except:
-                continue
+            cap = cv2.VideoCapture(img_path)
+            if not cap.isOpened():
+                raise IOError(f"Error opening video file: {img_path}")
 
-            theta_ray = detectedObject.theta_ray
-            input_img = detectedObject.img
-            proj_matrix = detectedObject.proj_matrix
-            box_2d = det.box_2d
-            detected_class = det.detected_class
+            frame_index = 0
+            if save_result and out is None:
+                # Get video properties
+                frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = int(cap.get(cv2.CAP_PROP_FPS))
+                out = cv2.VideoWriter(video_path, fourcc, fps, (frame_width, frame_height))
+                if not out.isOpened():
+                    raise IOError(f"Error opening video writer for file: {video_path}")
 
-            input_tensor = torch.zeros([1,3,224,224]).to('cpu')
-            input_tensor[0,:,:,:] = input_img
+            while cap.isOpened():
+                ret, img = cap.read()
+                if not ret:
+                    break
+                process_frame(img, regressor, averages, angle_bins, calib, show_result, save_result, out, frame_index)
+                frame_index += 1
+            cap.release()
+        else:
+            img = cv2.imread(img_path)
+            process_frame(img, regressor, averages, angle_bins, calib, show_result, save_result, out, i)
 
-            # predict orient, conf, and dim
-            [orient, conf, dim] = regressor(input_tensor)
-            orient = orient.cpu().data.numpy()[0, :, :]
-            conf = conf.cpu().data.numpy()[0, :]
-            dim = dim.cpu().data.numpy()[0, :]
+    # Release VideoWriter
+    if save_result and out is not None:
+        out.release()
 
-            dim += averages.get_item(detected_class)
+def process_frame(img, regressor, averages, angle_bins, calib, show_result, save_result, out, frame_index):
+    # Run detection 2d
+    img2D, bboxes2d = process2D(img, track=True)
 
-            argmax = np.argmax(conf)
-            orient = orient[argmax, :]
-            cos = orient[0]
-            sin = orient[1]
-            alpha = np.arctan2(sin, cos)
-            alpha += angle_bins[argmax]
-            alpha -= np.pi
+    for det in bboxes2d:
+        if not averages.recognized_class(det.detected_class):
+            continue
+        try: 
+            detectedObject = DetectedObject(img, det.detected_class, det.box_2d, calib)
+        except:
+            continue
 
-            # plot 3d detection
-            plot3d(img, proj_matrix, box_2d, dim, alpha, theta_ray)
+        theta_ray = detectedObject.theta_ray
+        input_img = detectedObject.img
+        proj_matrix = detectedObject.proj_matrix
+        box_2d = det.box_2d
+        detected_class = det.detected_class
 
-        if show_result:
-            cv2.imshow('3d detection', img)
-            cv2.waitKey(0)
+        input_tensor = torch.zeros([1,3,224,224]).to('cpu')
+        input_tensor[0,:,:,:] = input_img
 
-        if save_result and output_path is not None:
-            try:
-                os.mkdir(output_path)
-            except:
-                pass
-            cv2.imwrite(f'{output_path}/{i:03d}.png', img)
+        # Predict orient, conf, and dim
+        [orient, conf, dim] = regressor(input_tensor)
+        orient = orient.cpu().data.numpy()[0, :, :]
+        conf = conf.cpu().data.numpy()[0, :]
+        dim = dim.cpu().data.numpy()[0, :]
+
+        dim += averages.get_item(detected_class)
+
+        argmax = np.argmax(conf)
+        orient = orient[argmax, :]
+        cos = orient[0]
+        sin = orient[1]
+        alpha = np.arctan2(sin, cos)
+        alpha += angle_bins[argmax]
+        alpha -= np.pi
+
+        # Plot 3d detection
+        plot3d(img, proj_matrix, box_2d, dim, alpha, theta_ray)
+
+    if show_result:
+        cv2.imshow('3d detection', img)
+        cv2.waitKey(1)  # Use waitKey(1) for video to update frames
+
+    if save_result and out is not None:
+        out.write(img)  # Write frame to video
 
 @torch.no_grad()
-def detect2d(
-    weights,
-    source,
-    data,
-    imgsz,
-    device,
-    classes
-    ):
-
-    # array for boundingbox detection
-    bbox_list = []
-
-    # Directories
-    source = str(source)
-
+def process2D(image, track=True, device='cpu'):
+    bboxes = []
     # Load model
+    weights = 'yolov5s.pt'
+    data = 'data/coco128.yaml'
+    imgsz = [640, 640]
+    classes = [0, 2, 3, 5]
+
     device = select_device(device)
     model = DetectMultiBackend(weights, device=device, dnn=False, data=data)
     stride, names, pt, jit, onnx, engine = model.stride, model.names, model.pt, model.jit, model.onnx, model.engine
     imgsz = check_img_size(imgsz, s=stride)  # check image size
 
-    # Dataloader
-    dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
+    im0s = image
+    im = cv2.resize(im0s, (imgsz[1], imgsz[0]))
+    im = im.transpose(2, 0, 1)  # HWC to CHW
+    im = np.ascontiguousarray(im)
 
+    # Create a single-item dataset
+    dataset = [(None, im, im0s, None, '')]
+
+    model = torch.compile(model, backend="openvino", options={"device": "CPU"})
     # Run inference
     model.warmup(imgsz=(1, 3, *imgsz), half=False)  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0
@@ -187,15 +212,12 @@ def detect2d(
         pred = non_max_suppression(prediction=pred, classes=classes)
         dt[2] += time_sync() - t3
 
-        # Second-stage classifier (optional)
-        # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
-
         # Process predictions
         for i, det in enumerate(pred):  # per image
             seen += 1
             p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
 
-            p = Path(p)  # to Path
+            p = Path(p) if p else ''  # to Path if not None
             s += '%gx%g ' % im.shape[2:]  # print string
 
             if len(det):
@@ -216,7 +238,7 @@ def detect2d(
                     c = int(cls)  # integer class
                     label = names[c]
 
-                    bbox_list.append(Bbox(bbox, label))
+                    bboxes.append(Bbox(bbox, label))
 
             # Print time (inference-only)
             LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
@@ -225,7 +247,7 @@ def detect2d(
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
     LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
 
-    return bbox_list
+    return im0s, bboxes
 
 def plot3d(
     img,
@@ -237,7 +259,7 @@ def plot3d(
     img_2d=None
     ):
 
-    # the math! returns X, the corners used for constraint
+    # The math! returns X, the corners used for constraint
     location, X = calc_location(dimensions, proj_matrix, box_2d, alpha, theta_ray)
 
     orient = alpha + theta_ray
@@ -257,12 +279,12 @@ def parse_opt():
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--classes', default=[0, 2, 3, 5], nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
-    parser.add_argument('--reg_weights', type=str, default='weights/resnet18.pkl', help='Regressor model weights')
-    parser.add_argument('--model_select', type=str, default='resnet18', help='Regressor model list: resnet, vgg, eff')
+    parser.add_argument('--reg_weights', type=str, default='weights/epoch_10.pkl', help='Regressor model weights')
+    parser.add_argument('--model_select', type=str, default='resnet', help='Regressor model list: resnet, vgg, eff')
     parser.add_argument('--calib_file', type=str, default=ROOT / 'eval/camera_cal/calib_cam_to_cam.txt', help='Calibration file or path')
-    parser.add_argument('--show_result', action='store_true', help='Show Results with imshow')
+    parser.add_argument('--show_result', action='store_false', help='Show Results with imshow')
     parser.add_argument('--save_result', action='store_true', help='Save result')
-    parser.add_argument('--output_path', type=str, default=ROOT / 'output', help='Save output pat')
+    parser.add_argument('--output_path', type=str, default=ROOT / 'output', help='Save output path')
 
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
