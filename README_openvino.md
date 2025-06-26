@@ -23,18 +23,13 @@
 
 4. **Convert Source Models to ONNX and OpenVINO IR**
 
-   This step uses the unified script `weights/convert_models.py` to convert  source models (e.g., PyTorch `.pt` files, `.pkl` files) into ONNX format and then into OpenVINO Intermediate Representation (IR) format (`.xml` and `.bin` files). Converted models are saved to `weights/onnx/` for ONNX files and `weights/openvino/` for OpenVINO IR files by default.
+   This step uses `weights/convert_models.py` to convert source models (e.g., PyTorch `.pt` files, `.pkl` files) into ONNX format and then into OpenVINO (IR) format (`.xml` and `.bin` files). Converted models are saved to `weights/onnx/` for ONNX files and `weights/openvino/` for OpenVINO IR files by default.
 
    - **Default Conversion (YOLOv5s and ResNet18):**
-     To convert the default `yolov5s.pt` (using `models/yolov5s.yaml`) and `resnet18.pkl` (both expected to be in the `weights/` directory after Step 3), run:
+     To convert the default `yolov5s.pt` (using `models/yolov5s.yaml`) and `resnet18.pkl` run:
      ```bash
      python convert_models.py
      ```
-     This will produce:
-     - `weights/onnx/yolov5s.onnx`
-     - `weights/openvino/yolov5s.xml` and `weights/openvino/yolov5s.bin`
-     - `weights/onnx/resnet18.onnx`
-     - `weights/openvino/resnet18.xml` and `weights/openvino/resnet18.bin`
 
 5. **Run inference scripts**
 
