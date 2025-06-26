@@ -329,9 +329,7 @@ class DetectMultiBackend(nn.Module):
             session = onnxruntime.InferenceSession(w, providers=providers)
         elif xml:  # OpenVINO
             LOGGER.info(f'Loading {w} for OpenVINO inference...')
-            check_requirements(('openvino-dev',))  # requires openvino-dev: https://pypi.org/project/openvino-dev/
-            # import openvino.inference_engine as ie
-            # core = ie.IECore()
+            check_requirements(('openvino',))  # requires openvino: https://pypi.org/project/openvino/
             from openvino.runtime import Core
             core = Core()
             network = core.read_model(model=w, weights=Path(w).with_suffix('.bin'))  # *.xml, *.bin paths

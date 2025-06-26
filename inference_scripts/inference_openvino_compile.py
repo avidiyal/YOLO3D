@@ -85,7 +85,7 @@ def detect3d(
         
         # Run detection 2d
         dets = detect2d(
-            weights='yolov5s.pt',
+            weights='../weights/yolov5s.pt',
             source=img_path,
             data='../data/coco128.yaml',
             imgsz=[640, 640],
@@ -136,11 +136,16 @@ def detect3d(
             cv2.waitKey(0)
 
         if save_result and output_path is not None:
-            try:
-                os.mkdir(output_path)
-            except:
-                pass
-            cv2.imwrite(f'{output_path}/{i:03d}.png', img)
+            if not os.path.exists(output_path):
+                try:
+                    os.mkdir(output_path)
+                except Exception as e:
+                    print(f"Error creating directory: {e}")
+                    pass
+            # Save the image
+            im_name = f'{output_path}/{i:03d}.png'
+            cv2.imwrite(im_name, img)
+            LOGGER.info(f'Output Saved {im_name}')
 
 @torch.no_grad()
 def detect2d(
@@ -254,18 +259,18 @@ def plot3d(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
-    parser.add_argument('--source', type=str, default=ROOT / 'eval/image_2', help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--data', type=str, default=ROOT / '../data/coco128.yaml', help='(optional) dataset.yaml path')
+    parser.add_argument('--weights', nargs='+', type=str, default='../weights/yolov5s.pt', help='model path(s)')
+    parser.add_argument('--source', type=str, default='../eval/image_2', help='file/dir/URL/glob, 0 for webcam')
+    parser.add_argument('--data', type=str, default='../data/coco128.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--classes', default=[0, 2, 3, 5], nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
     parser.add_argument('--reg_weights', type=str, default='../weights/resnet18.pkl', help='Regressor model weights')
     parser.add_argument('--model_select', type=str, default='resnet18', help='Regressor model list: resnet, vgg, eff')
-    parser.add_argument('--calib_file', type=str, default=ROOT / 'eval/camera_cal/calib_cam_to_cam.txt', help='Calibration file or path')
+    parser.add_argument('--calib_file', type=str, default='../eval/camera_cal/calib_cam_to_cam.txt', help='Calibration file or path')
     parser.add_argument('--show_result', action='store_true', help='Show Results with imshow')
     parser.add_argument('--save_result', action='store_true', help='Save result')
-    parser.add_argument('--output_path', type=str, default=ROOT / 'output', help='Save output pat')
+    parser.add_argument('--output_path', type=str, default='../output', help='Save output pat')
 
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
