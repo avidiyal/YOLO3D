@@ -56,10 +56,6 @@ convert_model(
 )
 ```
 
-## Conclusion
-
-Make OpenVINO IR the canonical artifact for 3D perception deployments. Convert and validate your models with `ovc` or `convert_model()`, verify geometric outputs on a small calibration set, and ship the IR to devices. This ensures consistent, deployable perception that preserves spatial accuracy and simplifies fleet operations.
-
 ## OpenVINO-First Inference Wrapper
 
 Make OpenVINO the primary runtime in your stack. Provide a small wrapper that loads an IR and exposes a `predict()` API; fall back to a developer runtime only for local debugging.
