@@ -117,4 +117,3 @@ These images show 3D boxes after conversion and inference using the workflow abo
 
 The field is moving into 3D. Leaders in AI are already pointing to spatial understanding as the next frontier, and robotics teams must respond by making perception predictable and deployable. An OpenVINO-first workflow — convert, validate on a calibration set, and ship IR artifacts — turns research models into dependable robot behavior. Test on your sensors, share failure cases, and help build practical calibration suites that make 3D perception reliable in the real world.
 
-
