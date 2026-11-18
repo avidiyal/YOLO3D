@@ -207,7 +207,7 @@ class DetectedObject:
     """
     Processing image for NN input
     """
-    def __init__(self, img, detection_class, box_2d, proj_matrix, label=None):
+    def __init__(self, img, detection_class, box_2d, proj_matrix, label=None, normalize=True):
 
         # check if proj_matrix is path
         if isinstance(proj_matrix, str):
@@ -216,7 +216,7 @@ class DetectedObject:
         self.proj_matrix = proj_matrix
         self.theta_ray = self.calc_theta_ray(img, box_2d, proj_matrix)
         self.img_uint8 = self.format_img_uint8(img, box_2d)
-        self.img = self.normalize_img(self.img_uint8)
+        self.img = self.normalize_img(self.img_uint8) if normalize else None
         self.label = label
         self.detection_class = detection_class
 
