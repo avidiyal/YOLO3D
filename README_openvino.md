@@ -36,10 +36,7 @@
 
    - **Quantize YOLOv5s** (`weights/quantize_yolo.py`), using real calibration images from `eval/image_2/`:
      ```bash
-     python weights/quantize_yolo.py \
-       --ir weights/openvino/yolov5s.xml \
-       --images eval/image_2/ \
-       --output weights/openvino/yolov5s_int8.xml
+     python weights/quantize_yolo.py --ir weights/openvino/yolov5s.xml --images eval/image_2/ --output weights/openvino/yolov5s_int8.xml
      ```
      This writes `yolov5s_int8.xml` / `yolov5s_int8.bin` to `weights/openvino/`.
 
@@ -81,10 +78,7 @@
        ```
        To verify the actual INT8 quantized models produce correct 3D detections (not just faster timings), point `--weights`/`--reg_weights` at the quantized files from step 5:
        ```bash
-       python inference_openvino_xml.py \
-         --weights ../weights/openvino/yolov5s_int8.xml \
-         --reg_weights ../weights/openvino/resnet18_int8.xml \
-         --save_result --output_path ../output_int8
+       python inference_openvino_xml.py --weights ../weights/openvino/yolov5s_int8.xml --reg_weights ../weights/openvino/resnet18_int8.xml --save_result --output_path ../output_int8
        ```
 
      - To leverage `torch.compile` for an easier path to OpenVINO acceleration:
@@ -111,28 +105,16 @@
 
    ```bash
    # Compare source YOLOv5 with its OpenVINO IR on CPU.
-   python inference_scripts/accuracy.py yolo \
-     --source-model weights/yolov5s.pt \
-     --openvino-model weights/openvino/yolov5s.xml \
-     --dataset /path/to/KITTI/training \
-     --device CPU
+   python inference_scripts/accuracy.py yolo --source-model weights/yolov5s.pt --openvino-model weights/openvino/yolov5s.xml --dataset /path/to/KITTI/training --device CPU
 
    # Evaluate the source ResNet and OpenVINO ResNet on an NPU.
-  python inference_scripts/accuracy.py resnet \
-     --source-model weights/resnet18.pkl \
-     --openvino-model weights/openvino/resnet18.xml \
-     --dataset /path/to/KITTI/training \
-     --device NPU
+  python inference_scripts/accuracy.py resnet --source-model weights/resnet18.pkl --openvino-model weights/openvino/resnet18.xml --dataset /path/to/KITTI/training --device NPU
    ```
 
    To stream a labeled 1,000-image sample without downloading the entire corpus, use the Hugging Face KITTI training split:
 
    ```bash
-  python inference_scripts/accuracy.py yolo \
-     --source-model weights/yolov5s.pt \
-     --openvino-model weights/openvino/yolov5s.xml \
-     --hf-dataset nateraw/kitti \
-     --device CPU
+  python inference_scripts/accuracy.py yolo --source-model weights/yolov5s.pt --openvino-model weights/openvino/yolov5s.xml --hf-dataset nateraw/kitti --device CPU
    ```
 
   This uses labeled training images because the official KITTI test annotations are not public. Pass `--limit 0` to evaluate every streamed image, or `--limit 100` for a faster smoke test. Hugging Face data streams in source order by default to keep memory usage bounded; `--shuffle-seed 42` opts into reproducible shuffled sampling when sufficient memory is available. Pass only `--source-model` or only `--openvino-model` to evaluate one model. `--device` applies only to the OpenVINO model; PyTorch runs on CPU so the comparison focuses on model outputs rather than execution devices.

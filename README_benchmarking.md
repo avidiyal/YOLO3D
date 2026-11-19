@@ -35,31 +35,12 @@ This script benchmarks in-memory frame processing: 2D detection, NMS, crop prepr
 
 **Example Command (Native PyTorch Pipeline):**
 ```bash
-python inference_scripts/benchmark_full_pipeline.py \
-  --pipeline_type pytorch_native \
-  --yolo_weights weights/yolov5s.pt \
-  --yolo_cfg models/yolov5s.yaml \
-  --regressor_weights weights/resnet18.pkl \
-  --regressor_name resnet18 \
-  --dataset_path eval/image_2/ \
-  --calib_file eval/calib/ \
-  --device cpu \
-  --warmup_runs 3 \
-  --benchmark_runs 10
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type pytorch_native --yolo_weights weights/yolov5s.pt --yolo_cfg models/yolov5s.yaml --regressor_weights weights/resnet18.pkl --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device cpu --warmup_runs 3 --benchmark_runs 10
 ```
 
 **Example Command (OpenVINO IR Pipeline):**
 ```bash
-python inference_scripts/benchmark_full_pipeline.py \
-  --pipeline_type ir_openvino \
-  --yolo_weights weights/openvino/yolov5s.xml \
-  --regressor_weights weights/openvino/resnet18.xml \
-  --regressor_name resnet18 \
-  --dataset_path eval/image_2/ \
-  --calib_file eval/calib/ \
-  --device CPU \
-  --warmup_runs 3 \
-  --benchmark_runs 10
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type ir_openvino --yolo_weights weights/openvino/yolov5s.xml --regressor_weights weights/openvino/resnet18.xml --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --warmup_runs 3 --benchmark_runs 10
 ```
 
 **Dynamic Batch Example:**
@@ -75,17 +56,7 @@ Compare backends using the same shape mode and maximum batch size. Static and dy
 This optional path requires separately exported YOLO and ResNet ONNX models; the default conversion step does not create them. Use convert_models.py with `--onnx` to create them.
 
 ```bash
-python inference_scripts/benchmark_full_pipeline.py \
-  --pipeline_type onnx_openvino \
-  --yolo_weights weights/onnx/yolov5s.onnx \
-  --yolo_cfg models/yolov5s.yaml \
-  --regressor_weights weights/onnx/resnet18.onnx \
-  --regressor_name resnet18 \
-  --dataset_path eval/image_2/ \
-  --calib_file eval/calib/ \
-  --device CPU \
-  --warmup_runs 3 \
-  --benchmark_runs 10
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type onnx_openvino --yolo_weights weights/onnx/yolov5s.onnx --yolo_cfg models/yolov5s.yaml --regressor_weights weights/onnx/resnet18.onnx --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --warmup_runs 3 --benchmark_runs 10
 ```
 (Adapt paths and `--pipeline_type` for other configurations like `pytorch_compile_openvino`.)
 
@@ -97,16 +68,7 @@ Once the OpenVINO IR models have been quantized to INT8 with `weights/quantize_y
 
 **Example Command (INT8 OpenVINO IR Pipeline, CPU):**
 ```bash
-python inference_scripts/benchmark_full_pipeline.py \
-  --pipeline_type ir_openvino \
-  --yolo_weights weights/openvino/yolov5s_int8.xml \
-  --regressor_weights weights/openvino/resnet18_int8.xml \
-  --regressor_name resnet18 \
-  --dataset_path eval/image_2/ \
-  --calib_file eval/calib/ \
-  --device CPU \
-  --warmup_runs 3 \
-  --benchmark_runs 10
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type ir_openvino --yolo_weights weights/openvino/yolov5s_int8.xml --regressor_weights weights/openvino/resnet18_int8.xml --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --warmup_runs 3 --benchmark_runs 10
 ```
 Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly like the FP32 IR pipeline. Results are comparable directly against the FP32 IR run since both use the same `ir_openvino` pipeline type and inputs — only the model weights differ.
 
@@ -118,15 +80,7 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
    - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
    - **Example Command:**
      ```bash
-     python inference_scripts/benchmark_pytorch_native.py \
-       --weights weights/yolov5s.pt \
-       --cfg models/yolov5s.yaml \
-       --img_size 640 \
-       --batch_size 1 \
-       --device cpu \
-       --warmup_runs 10 \
-       --benchmark_runs 50 \
-       --dataset_path eval/image_2/
+     python inference_scripts/benchmark_pytorch_native.py --weights weights/yolov5s.pt --cfg models/yolov5s.yaml --img_size 640 --batch_size 1 --device cpu --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
      (Replace `cpu` with `cuda` if you have a compatible GPU and PyTorch GPU version installed.)
 
@@ -136,15 +90,7 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
    - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
    - **Example Command:**
      ```bash
-     python inference_scripts/benchmark_torch.py \
-       --weights weights/yolov5s.pt \
-       --cfg models/yolov5s.yaml \
-       --img_size 640 \
-       --batch_size 1 \
-       --device CPU \
-       --warmup_runs 10 \
-       --benchmark_runs 50 \
-       --dataset_path eval/image_2/
+     python inference_scripts/benchmark_torch.py --weights weights/yolov5s.pt --cfg models/yolov5s.yaml --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
 
 ### 3. ONNX with OpenVINO Runtime (`benchmark_onnx.py`)
@@ -153,14 +99,7 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
    - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
    - **Example Command:**
      ```bash
-     python inference_scripts/benchmark_onnx.py \
-       --model_path weights/onnx/yolov5s.onnx \
-       --img_size 640 \
-       --batch_size 1 \
-       --device CPU \
-       --warmup_runs 10 \
-       --benchmark_runs 50 \
-       --dataset_path eval/image_2/
+     python inference_scripts/benchmark_onnx.py --model_path weights/onnx/yolov5s.onnx --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
 
 ### 4. OpenVINO IR with OpenVINO Runtime (`benchmark_openvino_ir.py`)
@@ -169,14 +108,7 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
    - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
    - **Example Command:**
      ```bash
-     python inference_scripts/benchmark_openvino_ir.py \
-       --model_path weights/openvino/yolov5s.xml \
-       --img_size 640 \
-       --batch_size 1 \
-       --device CPU \
-       --warmup_runs 10 \
-       --benchmark_runs 50 \
-       --dataset_path eval/image_2/
+     python inference_scripts/benchmark_openvino_ir.py --model_path weights/openvino/yolov5s.xml --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
 
 

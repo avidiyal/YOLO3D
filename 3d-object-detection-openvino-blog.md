@@ -29,7 +29,7 @@ Having two models is what makes this a useful example, because later we put them
 
 All you need to follow along is an Intel CPU, Git, and Python 3 (we used 3.12). If your system also has an Intel GPU or NPU, [install the drivers](https://docs.openvino.ai/2026/get-started/install-openvino/configurations.html) so OpenVINO can use them. An Intel Core Ultra AI PC has all three devices.
 
-Run everything after step 1 from the `YOLO3D` folder. The commands are written for Linux. On Windows, use the alternatives in the comments, and end continued lines with `^` (Command Prompt) or a backtick (PowerShell) instead of `\`.
+Run everything after step 1 from the `YOLO3D` folder. The commands are written for Linux. On Windows, use the alternatives in the comments. All other commands are single lines that work in Command Prompt and PowerShell.
 
 **1. Get the code and install the dependencies.**
 
@@ -55,10 +55,7 @@ This writes `yolov5s.xml` and `resnet18.xml` to `weights/openvino/`, each with a
 **3. Optional: quantize the models to INT8.**
 
 ```bash
-python weights/quantize_yolo.py \
-  --ir weights/openvino/yolov5s.xml \
-  --images eval/image_2/ \
-  --output weights/openvino/yolov5s_int8.xml
+python weights/quantize_yolo.py --ir weights/openvino/yolov5s.xml --images eval/image_2/ --output weights/openvino/yolov5s_int8.xml
 
 python weights/quantize_resnet.py
 ```
@@ -78,14 +75,11 @@ Use the names exactly as they're printed. If the system has more than one GPU, t
 The `inference_openvino_xml.py` script is a quick demo of how to run inference with OpenVINO on the YOLO3D pipeline. By default it uses the images in `eval/image_2`. Run the script with `--help` to see all options.
 
 ```bash
-python inference_scripts/inference_openvino_xml.py --device CPU \
-  --save_result --output_path output_cpu
+python inference_scripts/inference_openvino_xml.py --device CPU --save_result --output_path output_cpu
 
-python inference_scripts/inference_openvino_xml.py --device GPU \
-  --save_result --output_path output_gpu
+python inference_scripts/inference_openvino_xml.py --device GPU --save_result --output_path output_gpu
 
-python inference_scripts/inference_openvino_xml.py --device NPU \
-  --save_result --output_path output_npu
+python inference_scripts/inference_openvino_xml.py --device NPU --save_result --output_path output_npu
 ```
 
 `--device` is the only thing that changes between these commands. Each run logs which device the models are on and saves the annotated images to its output folder. Compare the folders and you'll see the same objects detected on every device.
@@ -93,18 +87,13 @@ python inference_scripts/inference_openvino_xml.py --device NPU \
 If you did step 3, add the INT8 model paths to run the quantized models. This works on any device:
 
 ```bash
-python inference_scripts/inference_openvino_xml.py --device NPU \
-  --weights weights/openvino/yolov5s_int8.xml \
-  --reg_weights weights/openvino/resnet18_int8.xml \
-  --save_result --output_path output_npu_int8
+python inference_scripts/inference_openvino_xml.py --device NPU --weights weights/openvino/yolov5s_int8.xml --reg_weights weights/openvino/resnet18_int8.xml --save_result --output_path output_npu_int8
 ```
 
 **6. Split the pipeline across two devices.**
 
 ```bash
-python inference_scripts/inference_openvino_xml.py \
-  --det_device GPU --reg_device NPU \
-  --save_result --output_path output_split
+python inference_scripts/inference_openvino_xml.py --det_device GPU --reg_device NPU --save_result --output_path output_split
 ```
 
 This puts the detector on the GPU and the 3D regressor on the NPU. Any two devices from step 4 will work.
@@ -112,13 +101,7 @@ This puts the detector on the GPU and the 3D regressor on the NPU. Any two devic
 **7. Measure the speed on your hardware.**
 
 ```bash
-python inference_scripts/benchmark_full_pipeline.py \
-  --pipeline_type ir_openvino \
-  --yolo_weights weights/openvino/yolov5s.xml \
-  --regressor_weights weights/openvino/resnet18.xml \
-  --dataset_path eval/image_2/ \
-  --calib_file eval/camera_cal/calib_cam_to_cam.txt \
-  --device NPU
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type ir_openvino --yolo_weights weights/openvino/yolov5s.xml --regressor_weights weights/openvino/resnet18.xml --dataset_path eval/image_2/ --calib_file eval/camera_cal/calib_cam_to_cam.txt --device NPU
 ```
 
 The script prints the time spent in each stage and the overall frames per second. Change `--device` to compare devices. To measure the INT8 models from step 3, pass `yolov5s_int8.xml` and `resnet18_int8.xml` instead.
@@ -166,12 +149,7 @@ The [conversion script](https://github.com/avidiyal/YOLO3D/blob/main/weights/con
 Don't expect bit-identical results across devices. By default, the GPU and NPU typically compute in 16-bit floating point, and the CPU typically uses 32-bit. In our runs, every device found the same objects, and the 3D boxes differed only slightly. To put numbers on it, the [accuracy evaluator](https://github.com/avidiyal/YOLO3D/blob/main/inference_scripts/accuracy.py) compares the original PyTorch model with the OpenVINO model on labeled KITTI images:
 
 ```bash
-python inference_scripts/accuracy.py resnet \
-  --source-model weights/resnet18.pkl \
-  --openvino-model weights/openvino/resnet18.xml \
-  --hf-dataset nateraw/kitti \
-  --limit 100 \
-  --device NPU
+python inference_scripts/accuracy.py resnet --source-model weights/resnet18.pkl --openvino-model weights/openvino/resnet18.xml --hf-dataset nateraw/kitti --limit 100 --device NPU
 ```
 
 Run the same check on the INT8 models before you rely on them. The [accuracy workflow](https://github.com/avidiyal/YOLO3D/blob/main/README_openvino.md#7-measure-source-and-openvino-accuracy) has the details.
