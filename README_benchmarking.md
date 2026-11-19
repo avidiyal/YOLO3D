@@ -111,8 +111,6 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
      python inference_scripts/benchmark_openvino_ir.py --model_path weights/openvino/yolov5s.xml --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
 
-
-
 ## Notes:
 - **Device:** Performance will vary significantly based on the `--device` used (CPU, GPU, NPU) and the hardware capabilities.
 - **First Run:** The first time you run an OpenVINO benchmark (especially with `torch.compile` or for a new model/device combination), there might be a one-time model compilation/optimization cost. Subsequent runs will be faster. The warm-up runs in the scripts help mitigate this in reported averages.
