@@ -4,6 +4,8 @@ Say you're adding a vision feature to a desktop application. By the time your co
 
 You convert the model once, and the device it runs on is just a string you pass when you load it. To show what that looks like in practice, we took [YOLO3D](https://github.com/ruhyadi/YOLO3D), a small 3D object detection pipeline built from two neural networks, and ran it on the CPU, GPU, and NPU of an Intel® Core™ Ultra AI PC without changing the code. You don't need that exact machine to follow along. The same steps work on any Intel CPU, GPU, or NPU that OpenVINO supports.
 
+3D perception is getting a lot of attention right now. In [this talk](https://www.youtube.com/watch?v=y8NtMZ7VGmU), Fei-Fei Li, often called the "godmother of AI," explains why spatial understanding is the next frontier for AI. As more of that work moves into robotics and other real-world systems, being able to deploy 3D models reliably on the hardware you have becomes important, and that's where OpenVINO's IR format and device flexibility help.
+
 **What you'll see:**
 
 - One set of OpenVINO model files runs on the CPU, the GPU, and the NPU.
