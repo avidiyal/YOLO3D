@@ -51,7 +51,6 @@
 ### 6. Run inference scripts
 
    - **Original inference script**
-     (This script might need updates if it doesn't use the new model paths, or it might be deprecated if focus is on OpenVINO scripts.)
      ```bash
      python inference.py
      ```
@@ -79,13 +78,6 @@
        To verify the actual INT8 quantized models produce correct 3D detections (not just faster timings), point `--weights`/`--reg_weights` at the quantized files from step 5:
        ```bash
        python inference_openvino_xml.py --weights ../weights/openvino/yolov5s_int8.xml --reg_weights ../weights/openvino/resnet18_int8.xml --save_result --output_path ../output_int8
-       ```
-
-     - To leverage `torch.compile` for an easier path to OpenVINO acceleration:
-       Example using `yolov5s.pt`:
-       ```bash
-       # Assumes weights/yolov5s.pt is available
-       python inference_openvino_compile.py --save_result
        ```
 
 ### 7. Measure source and OpenVINO accuracy

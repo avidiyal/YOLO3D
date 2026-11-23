@@ -59,7 +59,8 @@ def detect3d(
     calib_file,
     show_result,
     save_result,
-    output_path
+    output_path,
+    weights
     ):
 
     # Directory
@@ -85,7 +86,7 @@ def detect3d(
         
         # Run detection 2d
         dets = detect2d(
-            weights='yolov5s.pt',
+            weights=weights,
             source=img_path,
             data='data/coco128.yaml',
             imgsz=[640, 640],
@@ -257,7 +258,7 @@ def plot3d(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'weights/yolov5s.pt', help='model path(s)')
     parser.add_argument('--source', type=str, default=ROOT / 'eval/image_2', help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
@@ -283,7 +284,8 @@ def main(opt):
         calib_file=opt.calib_file,
         show_result=opt.show_result,
         save_result=opt.save_result,
-        output_path=opt.output_path
+        output_path=opt.output_path,
+        weights=opt.weights
     )
 
 if __name__ == "__main__":

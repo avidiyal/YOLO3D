@@ -1,6 +1,6 @@
 # Benchmarking Guide
 
-This document explains how to use the provided scripts to benchmark inference performance for different execution modes: native PyTorch, PyTorch with `torch.compile` OpenVINO backend, ONNX models with OpenVINO Runtime, and OpenVINO IR models with OpenVINO Runtime.
+This document explains how to use the provided scripts to benchmark inference performance for different execution modes: native PyTorch, ONNX models with OpenVINO Runtime, and OpenVINO IR models with OpenVINO Runtime.
 
 All benchmark scripts are located in the `inference_scripts/` directory. They report average inference time in milliseconds (ms) and Frames Per Second (FPS). Higher FPS and lower ms indicate better performance.
 
@@ -12,7 +12,7 @@ All benchmark scripts are located in the `inference_scripts/` directory. They re
 
 This script benchmarks in-memory frame processing: 2D detection, NMS, crop preprocessing, 3D orientation/dimension regression, output decoding, geometric reconstruction, and drawing. Images and calibration matrices are preloaded; disk reads, model compilation, warm-up, and optional image saving are excluded from measured frame times.
 
-- **Purpose:** To measure the end-to-end performance of the 3D object detection pipeline with different model backends (native PyTorch, PyTorch+`torch.compile` with OpenVINO, ONNX with OpenVINO Runtime, OpenVINO IR with OpenVINO Runtime).
+- **Purpose:** To measure the end-to-end performance of the 3D object detection pipeline with different model backends (native PyTorch, ONNX with OpenVINO Runtime, OpenVINO IR with OpenVINO Runtime).
 - **Models Expected:**
     - A 2D detector model (PyTorch `.pt`, `.onnx`, or OpenVINO IR `.xml`).
     - A 3D regressor model (PyTorch `.pkl`, `.onnx`, or OpenVINO IR `.xml`).
@@ -33,14 +33,14 @@ This script benchmarks in-memory frame processing: 2D detection, NMS, crop prepr
 
   OpenVINO uses reusable requests and application-owned input tensors. Native CUDA timings synchronize the device. The IR regressor receives raw uint8 crops without redundant host normalization; the ONNX and PyTorch regressors receive normalized crops.
 
-**Example Command (Native PyTorch Pipeline):**
-```bash
-python inference_scripts/benchmark_full_pipeline.py --pipeline_type pytorch_native --yolo_weights weights/yolov5s.pt --yolo_cfg models/yolov5s.yaml --regressor_weights weights/resnet18.pkl --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device cpu --warmup_runs 3 --benchmark_runs 10
-```
-
 **Example Command (OpenVINO IR Pipeline):**
 ```bash
 python inference_scripts/benchmark_full_pipeline.py --pipeline_type ir_openvino --yolo_weights weights/openvino/yolov5s.xml --regressor_weights weights/openvino/resnet18.xml --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --warmup_runs 3 --benchmark_runs 10
+```
+
+**Example Command (Native PyTorch Pipeline):**
+```bash
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type pytorch_native --yolo_weights weights/yolov5s.pt --yolo_cfg models/yolov5s.yaml --regressor_weights weights/resnet18.pkl --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device cpu --warmup_runs 3 --benchmark_runs 10
 ```
 
 **Dynamic Batch Example:**
@@ -58,9 +58,7 @@ This optional path requires separately exported YOLO and ResNet ONNX models; the
 ```bash
 python inference_scripts/benchmark_full_pipeline.py --pipeline_type onnx_openvino --yolo_weights weights/onnx/yolov5s.onnx --yolo_cfg models/yolov5s.yaml --regressor_weights weights/onnx/resnet18.onnx --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --warmup_runs 3 --benchmark_runs 10
 ```
-(Adapt paths and `--pipeline_type` for other configurations like `pytorch_compile_openvino`.)
-
-The `pytorch_compile_openvino` path requires a compatible PyTorch/OpenVINO combination. On Windows with PyTorch 2.14.0 and OpenVINO 2026.4.1, ResNet compilation currently fails inside PyTorch's symbolic-shape guards (`IndexError: list index out of range`), including when tested independently of this benchmark. Native PyTorch and the direct OpenVINO IR/ONNX paths do not require this integration.
+(Adapt paths and `--pipeline_type` for other configurations like `pytorch_native`.)
 
 ### Benchmarking INT8 Quantized Models
 
@@ -74,7 +72,16 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
 
 ## Individual Model Benchmark Scripts
 
-### 1. Native PyTorch (`benchmark_pytorch_native.py`)
+### 1. OpenVINO IR with OpenVINO Runtime (`benchmark_openvino_ir.py`)
+   - **Purpose:** Measures inference speed of an OpenVINO Intermediate Representation (IR) model (`.xml` and `.bin` files) using the OpenVINO Runtime. This is often the most optimized path for OpenVINO.
+  - **Model Expected:** OpenVINO IR model (`.xml` file with its matching `.bin` file). Convert the source checkpoint first using `weights/convert_models.py`, which saves IR models to `weights/openvino/`.
+   - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
+   - **Example Command:**
+     ```bash
+     python inference_scripts/benchmark_openvino_ir.py --model_path weights/openvino/yolov5s.xml --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
+     ```
+
+### 2. Native PyTorch (`benchmark_pytorch_native.py`)
    - **Purpose:** Measures the inference speed of a PyTorch model running natively on the specified device (CPU or CUDA) without any OpenVINO optimizations.
    - **Model Expected:** PyTorch model (`.pt` file) and its configuration (`.yaml` file).
    - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
@@ -83,15 +90,6 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
      python inference_scripts/benchmark_pytorch_native.py --weights weights/yolov5s.pt --cfg models/yolov5s.yaml --img_size 640 --batch_size 1 --device cpu --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
      (Replace `cpu` with `cuda` if you have a compatible GPU and PyTorch GPU version installed.)
-
-### 2. PyTorch with `torch.compile` OpenVINO Backend (`benchmark_torch.py`)
-   - **Purpose:** Measures inference speed when using `torch.compile` with the OpenVINO backend. This allows PyTorch models to be accelerated by OpenVINO with minimal code changes.
-   - **Model Expected:** PyTorch model (`.pt` file) and its configuration (`.yaml` file).
-   - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
-   - **Example Command:**
-     ```bash
-     python inference_scripts/benchmark_torch.py --weights weights/yolov5s.pt --cfg models/yolov5s.yaml --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
-     ```
 
 ### 3. ONNX with OpenVINO Runtime (`benchmark_onnx.py`)
    - **Purpose:** Measures inference speed of an ONNX model using the OpenVINO Runtime.
@@ -102,18 +100,9 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
      python inference_scripts/benchmark_onnx.py --model_path weights/onnx/yolov5s.onnx --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
      ```
 
-### 4. OpenVINO IR with OpenVINO Runtime (`benchmark_openvino_ir.py`)
-   - **Purpose:** Measures inference speed of an OpenVINO Intermediate Representation (IR) model (`.xml` and `.bin` files) using the OpenVINO Runtime. This is often the most optimized path for OpenVINO.
-  - **Model Expected:** OpenVINO IR model (`.xml` file with its matching `.bin` file). Convert the source checkpoint first using `weights/convert_models.py`, which saves IR models to `weights/openvino/`.
-   - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
-   - **Example Command:**
-     ```bash
-     python inference_scripts/benchmark_openvino_ir.py --model_path weights/openvino/yolov5s.xml --img_size 640 --batch_size 1 --device CPU --warmup_runs 10 --benchmark_runs 50 --dataset_path eval/image_2/
-     ```
-
 ## Notes:
 - **Device:** Performance will vary significantly based on the `--device` used (CPU, GPU, NPU) and the hardware capabilities.
-- **First Run:** The first time you run an OpenVINO benchmark (especially with `torch.compile` or for a new model/device combination), there might be a one-time model compilation/optimization cost. Subsequent runs will be faster. The warm-up runs in the scripts help mitigate this in reported averages.
-- **Benchmarking with Real Data vs. Dummy Data:** Using the `--dataset_path` option to benchmark with real images can provide more realistic performance figures as it accounts for actual data characteristics and I/O, though the current implementation pre-loads all images to minimize I/O variability during timing loops. Dummy data is useful for quick checks and isolating pure computation speed.
+- **First Run:** The first time you run an OpenVINO benchmark for a new model/device combination, there might be a one-time model compilation/optimization cost. Subsequent runs will be faster. The warm-up runs in the scripts help mitigate this in reported averages.
+- **Benchmarking with Real Data vs. Dummy Data:** Using the `--dataset_path` option to benchmark with real images can provide more realistic performance figures. Dummy data is useful for quick checks and isolating pure computation speed.
 
 

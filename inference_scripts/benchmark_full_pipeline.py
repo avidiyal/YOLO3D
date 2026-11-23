@@ -100,7 +100,7 @@ def main():
         epilog="For onnx_openvino, first run: python weights/convert_models.py --onnx (from the repository root).",
     )
     parser.add_argument('--pipeline_type', type=str, required=True,
-                        choices=['pytorch_native', 'pytorch_compile_openvino', 'onnx_openvino', 'ir_openvino'],
+                        choices=['pytorch_native', 'onnx_openvino', 'ir_openvino'],
                         help="Type of pipeline to benchmark.")
     parser.add_argument('--yolo_weights', type=str, required=True, help="Path to 2D detector model file (e.g., .pt, .onnx, .xml).")
     parser.add_argument('--yolo_cfg', type=str, help="Path to YOLO model configuration YAML (required for PyTorch types).")
@@ -135,13 +135,12 @@ def main():
         parser.error("img_size_yolo must be positive; the regressor requires img_size_regressor=224")
 
     # Validate conditional cfg path
-    if args.pipeline_type in ['pytorch_native', 'pytorch_compile_openvino'] and not args.yolo_cfg:
+    if args.pipeline_type == 'pytorch_native' and not args.yolo_cfg:
         print("Error: --yolo_cfg is required for PyTorch-based pipeline types.", file=sys.stderr)
         sys.exit(1)
 
     # --- Device Setup ---
     # For PyTorch native, device_str is 'cpu' or 'cuda'.
-    # For torch.compile OpenVINO, device_str is OpenVINO device type ('CPU', 'GPU').
     # For OpenVINO ONNX/IR, device_str is OpenVINO device type ('CPU', 'GPU').
     pytorch_target_device_str = args.device if args.pipeline_type == 'pytorch_native' else 'cpu'
     pytorch_device = torch.device(pytorch_target_device_str)
@@ -180,8 +179,8 @@ def main():
     # --- Determine YOLO Stride and Class Names ---
     yolo_model_stride = 32
     yolo_class_names = [f'class_{i}' for i in range(80)] # Default
-    if args.pipeline_type in ['pytorch_native', 'pytorch_compile_openvino']:
-        yolo_eval_model = yolo_model._model if hasattr(yolo_model, '_model') else yolo_model # For compiled model
+    if args.pipeline_type == 'pytorch_native':
+        yolo_eval_model = yolo_model
         if hasattr(yolo_eval_model, 'stride'):
             yolo_model_stride = int(yolo_eval_model.stride.max().item() if isinstance(yolo_eval_model.stride, torch.Tensor) else yolo_eval_model.stride)
         if hasattr(yolo_eval_model, 'names'):
@@ -287,7 +286,7 @@ def main():
     print("Measured: preprocessing, inference, output decoding, geometry, drawing and frame overhead; excludes disk I/O.")
     if args.pipeline_type == 'pytorch_native':
         print(f"PyTorch Native Device: {pytorch_device.type}")
-    elif args.pipeline_type in ['onnx_openvino', 'ir_openvino', 'pytorch_compile_openvino']:
+    elif args.pipeline_type in ['onnx_openvino', 'ir_openvino']:
         print(f"Target OpenVINO Device: {openvino_target_device_str}")
     print(f"YOLO Input Size: {args.img_size_yolo}x{args.img_size_yolo}")
     print(f"Regressor Input Patch Size: {args.img_size_regressor}x{args.img_size_regressor}")
