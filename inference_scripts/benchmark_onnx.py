@@ -1,6 +1,16 @@
 # Copyright (C) 2018-2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+"""Benchmark an ONNX model using OpenVINO.
+
+Export the models first, running from the repository root:
+    python weights/convert_models.py --onnx
+
+The ONNX files are saved under weights/onnx/ by default. For example:
+    python inference_scripts/benchmark_onnx.py --model_path weights/onnx/yolov5s.onnx
+For ResNet, pass --model_path weights/onnx/resnet18.onnx --img_size 224.
+"""
+
 import openvino as ov
 import numpy
 import time
@@ -29,7 +39,10 @@ except ImportError as e:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ONNX Model + OpenVINO Runtime Benchmark Script with Real Dataset")
+    parser = argparse.ArgumentParser(
+        description="ONNX Model + OpenVINO Runtime Benchmark Script with Real Dataset",
+        epilog="Create ONNX models first with: python weights/convert_models.py --onnx (from the repository root).",
+    )
     parser.add_argument('--model_path', type=str, required=True, help='Path to ONNX model file')
     parser.add_argument('--dataset_path', type=str, default=None, help='Path to dataset directory or image file. If None, uses dummy data.')
     parser.add_argument('--img_size', type=int, default=640, help='Image size (square) for preprocessing and model input. Must match ONNX model expected input size.')
@@ -145,9 +158,9 @@ def main():
         for _ in range(args.warmup_runs):
             if args.dataset_path:
                 batch_data_np = get_real_batch_from_preloaded_np()
-                compiled_model.infer_new_request({final_input_layer.any_name: batch_data_np})
+                compiled_model({final_input_layer.any_name: batch_data_np})
             else:
-                compiled_model.infer_new_request({final_input_layer.any_name: dummy_input_batch_np})
+                compiled_model({final_input_layer.any_name: dummy_input_batch_np})
         print("Warm-up runs completed.")
     except Exception as e:
         print(f"Error during warm-up runs: {e}", file=sys.stderr)
@@ -161,9 +174,9 @@ def main():
             start_time = time.perf_counter()
             if args.dataset_path:
                 batch_data_np = get_real_batch_from_preloaded_np()
-                compiled_model.infer_new_request({final_input_layer.any_name: batch_data_np})
+                compiled_model({final_input_layer.any_name: batch_data_np})
             else:
-                compiled_model.infer_new_request({final_input_layer.any_name: dummy_input_batch_np})
+                compiled_model({final_input_layer.any_name: dummy_input_batch_np})
             end_time = time.perf_counter()
             timings.append(end_time - start_time)
             if (i + 1) % 10 == 0:

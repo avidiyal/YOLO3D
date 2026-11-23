@@ -1,12 +1,21 @@
 # Copyright (C) 2018-2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+"""Shared inference steps for the full-pipeline benchmark.
+
+Generate models for onnx_openvino with `python weights/convert_models.py --onnx`
+from the repository root. ONNX ResNet expects normalized float32 BGR crops;
+the directly converted IR includes preprocessing and expects uint8 BGR crops.
+"""
+
 import time
 import torch
 import numpy as np
 import cv2 # For image operations if any are done outside LoadImages
 from pathlib import Path
 import sys
+from library.Math import calc_location
+from library.Plotting import plot_3d_box
 
 # Add project root for custom module imports
 FILE = Path(__file__).resolve()
@@ -41,9 +50,9 @@ except ImportError as e:
     DetectedObject, generate_bins, ClassAverages = None,None,None
 
 
-def load_yolo_detector(weights_path, cfg_path, device_str, model_type='pytorch_native', img_size=(640,640), batch_size=1):
+def load_yolo_detector(weights_path, cfg_path, device_str, model_type='pytorch_native', img_size=(640,640), batch_size=1, dynamic_shapes=False):
     print(f"Loading YOLO detector ({model_type}) from: {weights_path} with cfg: {cfg_path} on device: {device_str}")
-    if YOLOModel is None and model_type in ['pytorch_native', 'pytorch_compile_openvino']:
+    if YOLOModel is None and model_type == 'pytorch_native':
         raise ImportError("YOLOModel class from models.yolo is not available for PyTorch types.")
     if ov is None and model_type in ['onnx_openvino', 'ir_openvino']:
         raise ImportError("OpenVINO runtime (ov) not available for OpenVINO types.")
@@ -53,7 +62,6 @@ def load_yolo_detector(weights_path, cfg_path, device_str, model_type='pytorch_n
             device = torch.device(device_str)
             checkpoint = torch.load(weights_path, map_location=device, weights_only=False)
             final_model = None
-            # Extract names from checkpoint before rebuilding model from cfg
             names_from_checkpoint = None
             if hasattr(checkpoint, 'names'):
                 names_from_checkpoint = checkpoint.names
@@ -62,85 +70,36 @@ def load_yolo_detector(weights_path, cfg_path, device_str, model_type='pytorch_n
             if hasattr(checkpoint, 'yaml') and hasattr(checkpoint, 'model') and hasattr(checkpoint, 'eval'):
                 final_model = checkpoint.to(device).eval()
                 if cfg_path:
-                    temp_model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
-                    temp_model_from_cfg.load_state_dict(final_model.state_dict())
-                    final_model = temp_model_from_cfg.eval()
+                    model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
+                    model_from_cfg.load_state_dict(final_model.state_dict())
+                    final_model = model_from_cfg.eval()
             elif isinstance(checkpoint, dict) and 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'):
-                loaded_sub_model = checkpoint['model']
-                if hasattr(loaded_sub_model, 'yaml_file') or hasattr(loaded_sub_model, 'yaml'):
-                    final_model = loaded_sub_model.to(device).float().eval()
+                loaded_model = checkpoint['model']
+                if hasattr(loaded_model, 'yaml_file') or hasattr(loaded_model, 'yaml'):
+                    final_model = loaded_model.to(device).float().eval()
                     if cfg_path:
-                        temp_model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
-                        temp_model_from_cfg.load_state_dict(final_model.state_dict())
-                        final_model = temp_model_from_cfg.eval()
+                        model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
+                        model_from_cfg.load_state_dict(final_model.state_dict())
+                        final_model = model_from_cfg.eval()
                 else:
                     model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
-                    model_from_cfg.load_state_dict(loaded_sub_model.state_dict())
+                    model_from_cfg.load_state_dict(loaded_model.state_dict())
                     final_model = model_from_cfg.eval()
             elif isinstance(checkpoint, dict) and ('state_dict' in checkpoint or 'model_state_dict' in checkpoint):
                 state_dict_key = 'state_dict' if 'state_dict' in checkpoint else 'model_state_dict'
-                state_dict = checkpoint[state_dict_key]
                 model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
-                model_from_cfg.load_state_dict(state_dict)
+                model_from_cfg.load_state_dict(checkpoint[state_dict_key])
                 final_model = model_from_cfg.eval()
             else:
                 model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).to(device)
                 model_from_cfg.load_state_dict(checkpoint)
                 final_model = model_from_cfg.eval()
-            if final_model is None: raise ValueError("Could not load PyTorch native model.")
-            # Restore class names from the original checkpoint (lost when rebuilding from cfg)
+            if final_model is None:
+                raise ValueError("Could not load PyTorch native model.")
             if names_from_checkpoint is not None:
                 final_model.names = names_from_checkpoint
             print(f"PyTorch native YOLO model loaded successfully on {device_str}.")
             return final_model
-
-        elif model_type == 'pytorch_compile_openvino':
-            device_cpu = torch.device('cpu')
-            checkpoint = torch.load(weights_path, map_location=device_cpu, weights_only=False)
-            model_on_cpu = None
-            # Extract names from checkpoint before rebuilding model from cfg
-            names_from_checkpoint = None
-            if hasattr(checkpoint, 'names'):
-                names_from_checkpoint = checkpoint.names
-            elif isinstance(checkpoint, dict) and 'model' in checkpoint and hasattr(checkpoint['model'], 'names'):
-                names_from_checkpoint = checkpoint['model'].names
-            if hasattr(checkpoint, 'yaml') and hasattr(checkpoint, 'model') and hasattr(checkpoint, 'eval'):
-                model_on_cpu = checkpoint.cpu().eval()
-                if cfg_path:
-                    temp_model_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).cpu()
-                    temp_model_cfg.load_state_dict(model_on_cpu.state_dict())
-                    model_on_cpu = temp_model_cfg.eval()
-            elif isinstance(checkpoint, dict) and 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'): # More complete handling
-                loaded_sub_model = checkpoint['model'].cpu()
-                if hasattr(loaded_sub_model, 'yaml_file') or hasattr(loaded_sub_model, 'yaml'):
-                    model_on_cpu = loaded_sub_model.float().eval()
-                    if cfg_path:
-                        temp_model_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).cpu()
-                        temp_model_cfg.load_state_dict(model_on_cpu.state_dict())
-                        model_on_cpu = temp_model_cfg.eval()
-                else:
-                    model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).cpu()
-                    model_from_cfg.load_state_dict(loaded_sub_model.state_dict())
-                    model_on_cpu = model_from_cfg.eval()
-            elif isinstance(checkpoint, dict) and ('state_dict' in checkpoint or 'model_state_dict' in checkpoint):
-                state_dict_key = 'state_dict' if 'state_dict' in checkpoint else 'model_state_dict'
-                state_dict = checkpoint[state_dict_key]
-                model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).cpu()
-                model_from_cfg.load_state_dict(state_dict)
-                model_on_cpu = model_from_cfg.eval()
-            else:
-                model_from_cfg = YOLOModel(cfg=cfg_path, ch=3, nc=None).cpu()
-                model_from_cfg.load_state_dict(checkpoint)
-                model_on_cpu = model_from_cfg.eval()
-
-            if model_on_cpu is None: raise ValueError("Could not load PyTorch model on CPU for compile.")
-            # Restore class names from the original checkpoint (lost when rebuilding from cfg)
-            if names_from_checkpoint is not None:
-                model_on_cpu.names = names_from_checkpoint
-            print(f"PyTorch YOLO model loaded on CPU, compiling with OpenVINO backend for {device_str.upper()}...")
-            compiled_model = torch.compile(model_on_cpu, backend="openvino", options={"device": device_str.upper()})
-            print("PyTorch YOLO model compiled with OpenVINO backend successfully.")
-            return compiled_model
 
         elif model_type in ['onnx_openvino', 'ir_openvino']:
             core = ov.Core()
@@ -148,14 +107,15 @@ def load_yolo_detector(weights_path, cfg_path, device_str, model_type='pytorch_n
             ov_model = core.read_model(weights_path)
             try:
                 input_name = ov_model.input(0).any_name
-                # Use fixed batch size
-                new_shape = ov.PartialShape([1, 3, img_size[0], img_size[1]])
+                new_shape = ov.PartialShape([ov.Dimension(1, batch_size) if dynamic_shapes else batch_size, 3, img_size[0], img_size[1]])
                 ov_model.reshape({input_name: new_shape})
-                print(f"Reshaped OpenVINO YOLO model input to {new_shape} (fixed batch size: 1)")
+                print(f"Reshaped OpenVINO YOLO model input to {new_shape}")
             except Exception as e:
-                print(f"Warning: Could not reshape OpenVINO model. Using default shape. Error: {e}", file=sys.stderr)
+                raise ValueError(f"Could not reshape YOLO input: {e}") from e
             print(f"Compiling OpenVINO model for device: {device_str.upper()}")
-            compiled_model = core.compile_model(ov_model, device_name=device_str.upper())
+            compiled_model = core.compile_model(
+                ov_model, device_name=device_str.upper(), config={'PERFORMANCE_HINT': 'LATENCY'},
+            )
             print("OpenVINO model compiled successfully.")
             return compiled_model
         else:
@@ -164,14 +124,14 @@ def load_yolo_detector(weights_path, cfg_path, device_str, model_type='pytorch_n
         print(f"Error loading/compiling YOLO detector ({model_type}): {e}", file=sys.stderr)
         return None
 
-def load_regressor_model(weights_path, model_name_str, device_str, model_type='pytorch_native', img_size=(224,224), batch_size=1):
+def load_regressor_model(weights_path, model_name_str, device_str, model_type='pytorch_native', img_size=(224,224), batch_size=1, dynamic_shapes=False):
     print(f"Loading Regressor ({model_type}, {model_name_str}) from: {weights_path} on device: {device_str}")
     if model_name_str != 'resnet18':
         print(f"Warning: This function is primarily set up for 'resnet18' based custom regressor. Found: {model_name_str}", file=sys.stderr)
 
-    if ResNet18 is None and model_type in ['pytorch_native', 'pytorch_compile_openvino']:
+    if ResNet18 is None and model_type == 'pytorch_native':
         raise ImportError("Custom ResNet18 class not available for PyTorch types.")
-    if torchvision_resnet18 is None and model_type in ['pytorch_native', 'pytorch_compile_openvino']:
+    if torchvision_resnet18 is None and model_type == 'pytorch_native':
         raise ImportError("Base torchvision.models.resnet18 not available for PyTorch types.")
     if ov is None and model_type in ['onnx_openvino', 'ir_openvino']:
         raise ImportError("OpenVINO runtime (ov) not available for OpenVINO types.")
@@ -192,33 +152,17 @@ def load_regressor_model(weights_path, model_name_str, device_str, model_type='p
             print(f"PyTorch native Regressor model loaded successfully on {device_str}.")
             return model
 
-        elif model_type == 'pytorch_compile_openvino':
-            device_cpu = torch.device('cpu')
-            base_tv_model = torchvision_resnet18(weights=None, progress=False)
-            model_cpu = ResNet18(model=base_tv_model).to(device_cpu)
-            checkpoint = torch.load(weights_path, map_location=device_cpu, weights_only=False)
-            # ... (robust pkl loading logic for CPU as before)
-            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint: model_cpu.load_state_dict(checkpoint['model_state_dict'])
-            elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint: model_cpu.load_state_dict(checkpoint['state_dict'])
-            else: model_cpu.load_state_dict(checkpoint) # Assume raw state_dict
-            model_cpu.eval()
-            print(f"PyTorch Regressor model loaded on CPU, compiling with OpenVINO backend for {device_str.upper()}...")
-            compiled_model = torch.compile(model_cpu, backend="openvino", options={"device": device_str.upper()})
-            print("PyTorch Regressor compiled with OpenVINO backend successfully.")
-            return compiled_model
-
         elif model_type in ['onnx_openvino', 'ir_openvino']:
             core = ov.Core()
             print(f"Reading OpenVINO compatible Regressor model ({('ONNX' if model_type == 'onnx_openvino' else 'IR')}) from: {weights_path}")
             ov_model = core.read_model(weights_path)
             try:
                 input_name = ov_model.input(0).any_name
-                # Use fixed batch size
-                new_shape = ov.PartialShape([batch_size, 3, img_size[0], img_size[1]])
+                new_shape = ov.PartialShape([ov.Dimension(1, batch_size) if dynamic_shapes else batch_size, 3, img_size[0], img_size[1]])
                 ov_model.reshape({input_name: new_shape})
-                print(f"Reshaped OpenVINO Regressor model input to {new_shape} (fixed batch size: {batch_size})")
+                print(f"Reshaped OpenVINO Regressor model input to {new_shape}")
             except Exception as e:
-                print(f"Warning: Could not reshape OpenVINO Regressor model. Using default shape. Error: {e}", file=sys.stderr)
+                raise ValueError(f"Could not reshape regressor input: {e}") from e
             print(f"Compiling OpenVINO Regressor model for device: {device_str.upper()}")
             
             # Apply performance optimization config BEFORE compilation
@@ -236,14 +180,60 @@ def load_regressor_model(weights_path, model_name_str, device_str, model_type='p
         print(f"Error loading/compiling Regressor model ({model_type}): {e}", file=sys.stderr)
         return None
 
-# COCO to KITTI class name mapping (for OpenVINO models that can't extract names)
+# COCO to KITTI class name mapping.
+# YOLO detects all COCO classes unless --yolo_classes_to_detect is set. Detections are renamed to
+# KITTI classes with these mappings (person -> pedestrian, motorcycle -> cyclist, bus -> truck),
+# and only classes found in script/class_averages.txt (car, truck, pedestrian, cyclist, ...) are
+# passed to the regressor. inference_openvino_xml.py does not apply this mapping and only regresses
+# cars, so this benchmark can process more objects per frame than that demo.
 COCO_TO_KITTI_MAPPING = {
     0: 'pedestrian',     # person
     2: 'car',
-    3: 'cyclist',        # bicycle
+    3: 'cyclist',        # motorcycle
     5: 'truck',          # bus -> truck (approximate)
     7: 'truck',
 }
+COCO_TO_KITTI_ALIASES = {
+    'person': 'pedestrian',
+    'motorcycle': 'cyclist',
+    'bus': 'truck',
+}
+
+def load_projection(calibration):
+    if isinstance(calibration, (str, Path)):
+        with Path(calibration).open() as stream:
+            for line in stream:
+                fields = line.split()
+                if fields and fields[0] in ('P2:', 'P_rect_02:'):
+                    projection = np.asarray(fields[1:], dtype=np.float64).reshape(3, 4)
+                    break
+            else:
+                raise ValueError(f"No P2 or P_rect_02 projection in {calibration}")
+    else:
+        projection = np.asarray(calibration, dtype=np.float64)
+    if projection.shape != (3, 4) or not np.isfinite(projection).all() or projection[0, 0] <= 0:
+        raise ValueError("Calibration must contain a finite 3x4 projection with positive focal length")
+    return projection
+
+
+def synchronized_time(device):
+    if device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    return time.perf_counter()
+
+
+def infer_openvino(model, input_data, request=None):
+    if request is None:
+        results = model(input_data, share_outputs=True)
+        return [results[output] for output in model.outputs], None
+    request.set_input_tensor(ov.Tensor(input_data, shared_memory=True))
+    request.start_async()
+    request.wait()
+    outputs = [request.get_output_tensor(index).data for index in range(len(model.outputs))]
+    if any(output.shape[0] != input_data.shape[0] for output in outputs):
+        raise RuntimeError("OpenVINO output batch does not match input batch")
+    return outputs, request.latency / 1000.0
+
 
 def benchmarkable_detect3d(
     yolo_model,
@@ -264,9 +254,31 @@ def benchmarkable_detect3d(
     yolo_classes_to_detect=None,
     max_detections_yolo=1000,
     regressor_batch_size=64,
-    override_class_names=None
+    override_class_names=None,
+    yolo_request=None,
+    regressor_request=None,
+    regressor_buffer=None,
+    dynamic_shapes=False,
 ):
-    timings = {}
+    if regressor_batch_size <= 0:
+        raise ValueError("regressor_batch_size must be positive")
+    if tuple(img_size_regressor) != (224, 224):
+        raise ValueError("DetectedObject preprocessing requires regressor size 224x224")
+    timing_device = device_pytorch if yolo_model_type == 'pytorch_native' else torch.device('cpu')
+    frame_start = synchronized_time(timing_device)
+    projection = load_projection(calib_file_path)
+    timings = {
+        'regressor_crop_preprocess_total': 0.0,
+        'regressor_batch_prepare_total': 0.0,
+        'regressor_inference_batch_total': 0.0,
+        'regressor_output_decode_total': 0.0,
+        'geometry_total': 0.0,
+        'drawing_total': 0.0,
+        'num_regressor_runs': 0,
+        'num_regressor_batches': 0,
+        'num_skipped_crops': 0,
+        'num_3d_boxes': 0,
+    }
     img_original_shape_hw = input_image_np.shape[:2]
 
     # Use override_class_names if provided, otherwise extract from model
@@ -274,43 +286,40 @@ def benchmarkable_detect3d(
         names = override_class_names
     else:
         names = None
-        if yolo_model_type in ['pytorch_native', 'pytorch_compile_openvino']:
-            yolo_model_for_names = yolo_model._model if hasattr(yolo_model, '_model') and hasattr(yolo_model._model, 'names') else yolo_model
-            if hasattr(yolo_model_for_names, 'names'): names = yolo_model_for_names.names
+        if yolo_model_type == 'pytorch_native' and hasattr(yolo_model, 'names'):
+            names = yolo_model.names
         if names is None: 
             # For OpenVINO models, create COCO names with KITTI mapping fallback
             coco_names = [f'class_{i}' for i in range(80)]
             names = coco_names
 
-    time_start_yolo_preproc = time.perf_counter()
+    time_start_yolo_preproc = synchronized_time(timing_device)
     img_yolo_letterboxed = letterbox(input_image_np, new_shape=img_size_yolo, stride=stride_yolo, auto=False)[0]
     img_yolo_chw_rgb = img_yolo_letterboxed.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
     img_yolo_chw_rgb_contiguous = np.ascontiguousarray(img_yolo_chw_rgb)
     yolo_input_feed = None
-    if yolo_model_type in ['pytorch_native', 'pytorch_compile_openvino']:
+    if yolo_model_type == 'pytorch_native':
         yolo_input_feed = torch.from_numpy(img_yolo_chw_rgb_contiguous)
-        yolo_input_feed = yolo_input_feed.to(device_pytorch if yolo_model_type == 'pytorch_native' else torch.device('cpu'))
+        yolo_input_feed = yolo_input_feed.to(device_pytorch)
         yolo_input_feed = yolo_input_feed.float() / 255.0
         if yolo_input_feed.ndimension() == 3: yolo_input_feed = yolo_input_feed.unsqueeze(0)
     elif yolo_model_type in ['onnx_openvino', 'ir_openvino']:
         yolo_input_feed = (img_yolo_chw_rgb_contiguous.astype(np.float32) / 255.0)[np.newaxis, :]
     else: raise ValueError(f"Unsupported yolo_model_type for preprocessing: {yolo_model_type}")
-    timings['yolo_preprocessing'] = time.perf_counter() - time_start_yolo_preproc
+    timings['yolo_preprocessing'] = synchronized_time(timing_device) - time_start_yolo_preproc
 
     yolo_preds_raw = None
-    time_start_yolo_infer = time.perf_counter()
+    time_start_yolo_infer = synchronized_time(timing_device)
     if yolo_model_type == 'pytorch_native':
         with torch.no_grad(): yolo_preds_raw_tuple = yolo_model(yolo_input_feed); yolo_preds_raw = yolo_preds_raw_tuple[0] if isinstance(yolo_preds_raw_tuple, tuple) else yolo_preds_raw_tuple
-    elif yolo_model_type == 'pytorch_compile_openvino':
-        with torch.no_grad(): yolo_preds_raw_tuple = yolo_model(yolo_input_feed); yolo_preds_raw = yolo_preds_raw_tuple[0] if isinstance(yolo_preds_raw_tuple, tuple) else yolo_preds_raw_tuple
     elif yolo_model_type in ['onnx_openvino', 'ir_openvino']:
-        input_name = yolo_model.input(0).any_name
-        output_tensor_ov = yolo_model.output(0)
-        results = yolo_model.infer_new_request({input_name: yolo_input_feed})
-        yolo_preds_raw = torch.from_numpy(results[output_tensor_ov]).to(device_pytorch if device_pytorch.type != 'cuda' else 'cpu')
-    timings['yolo_inference'] = time.perf_counter() - time_start_yolo_infer
+        outputs, latency = infer_openvino(yolo_model, yolo_input_feed, yolo_request)
+        yolo_preds_raw = torch.from_numpy(outputs[0])
+        if latency is not None:
+            timings['yolo_device_latency'] = latency
+    timings['yolo_inference'] = synchronized_time(timing_device) - time_start_yolo_infer
 
-    time_start_yolo_postproc = time.perf_counter()
+    time_start_yolo_postproc = synchronized_time(timing_device)
     detections_after_nms = non_max_suppression(yolo_preds_raw, conf_thres_yolo, iou_thres_yolo, classes=yolo_classes_to_detect, agnostic=False, max_det=max_detections_yolo)
     processed_detections_for_regressor = []
     if detections_after_nms and detections_after_nms[0] is not None:
@@ -319,49 +328,61 @@ def benchmarkable_detect3d(
         for i, det in enumerate(single_image_detections):
             processed_detections_for_regressor.append({"xyxy_scaled": scaled_coords_dets[i].numpy(), "conf": det[4].item(), "cls_idx": int(det[5].item())})
     num_2d_detections = len(processed_detections_for_regressor)
-    timings['yolo_postprocessing'] = time.perf_counter() - time_start_yolo_postproc
-
-    timings.update({'regressor_crop_preprocess_total': 0, 'regressor_inference_batch_total': 0, 'regressor_output_decode_total': 0, 'num_regressor_runs': 0})
+    timings['yolo_postprocessing'] = synchronized_time(timing_device) - time_start_yolo_postproc
+    timings['num_2d_detections'] = num_2d_detections
+    drawing_start = time.perf_counter()
+    annotated_image = input_image_np.copy()
+    timings['drawing_total'] += time.perf_counter() - drawing_start
 
     if num_2d_detections > 0:
         regressor_input_batch_constructor = []
-        skipped_due_to_class = 0
-        skipped_due_to_exception = 0
+        crop_metadata = []
         
         for det_info in processed_detections_for_regressor:
             _t_start = time.perf_counter()
             cls_idx = det_info["cls_idx"]
             
-            # Get class name: try direct names lookup, fallback to COCO-to-KITTI mapping for OpenVINO
             if names and 0 <= cls_idx < len(names):
                 detected_class_name = names[cls_idx]
             else:
                 detected_class_name = f'class_{cls_idx}'
             
-            # For OpenVINO models using generic class names, try COCO-to-KITTI mapping
-            if detected_class_name.startswith('class_') and yolo_model_type in ['onnx_openvino', 'ir_openvino']:
-                if cls_idx in COCO_TO_KITTI_MAPPING:
-                    detected_class_name = COCO_TO_KITTI_MAPPING[cls_idx]
+            if detected_class_name.startswith('class_'):
+                detected_class_name = COCO_TO_KITTI_MAPPING.get(cls_idx, detected_class_name)
+            else:
+                detected_class_name = COCO_TO_KITTI_ALIASES.get(detected_class_name.lower(), detected_class_name)
             
             if class_averages and not class_averages.recognized_class(detected_class_name):
                 timings['regressor_crop_preprocess_total'] += time.perf_counter() - _t_start
-                skipped_due_to_class += 1
+                timings['num_skipped_crops'] += 1
                 continue
             # Convert flat coordinates [x1, y1, x2, y2] to nested format [[x1, y1], [x2, y2]]
-            xyxy = [int(c) for c in det_info["xyxy_scaled"]]
+            xyxy = [int(coord) for coord in det_info["xyxy_scaled"]]
+            height, width = img_original_shape_hw
+            xyxy[0], xyxy[2] = np.clip([xyxy[0], xyxy[2]], 0, width - 1).tolist()
+            xyxy[1], xyxy[3] = np.clip([xyxy[1], xyxy[3]], 0, height - 1).tolist()
             box_2d = [(xyxy[0], xyxy[1]), (xyxy[2], xyxy[3])]
             try:
-                detected_obj = DetectedObject(input_image_np, detected_class_name, box_2d, calib_file_path)
+                if xyxy[2] <= xyxy[0] or xyxy[3] <= xyxy[1]:
+                    raise ValueError("Degenerate crop")
+                detected_obj = DetectedObject(
+                    input_image_np, detected_class_name, box_2d, projection,
+                    normalize=regressor_model_type != 'ir_openvino',
+                )
                 regressor_patch_tensor = detected_obj.img
-                if regressor_model_type in ['pytorch_native', 'pytorch_compile_openvino']: 
+                if regressor_model_type == 'pytorch_native':
                     regressor_input_batch_constructor.append(regressor_patch_tensor)
-                elif regressor_model_type in ['onnx_openvino', 'ir_openvino']: 
+                elif regressor_model_type == 'onnx_openvino':
                     regressor_input_batch_constructor.append(regressor_patch_tensor.cpu().numpy())
+                elif regressor_model_type == 'ir_openvino':
+                    regressor_input_batch_constructor.append(detected_obj.img_uint8)
+                else:
+                    raise ValueError(f"Unsupported regressor type: {regressor_model_type}")
+                crop_metadata.append((detected_obj, detected_class_name, box_2d))
                 timings['regressor_crop_preprocess_total'] += time.perf_counter() - _t_start
-            except Exception as e:
-                print(f"Warning: Failed to create DetectedObject for class '{detected_class_name}' with box {box_2d}: {e}", file=sys.stderr)
+            except (ValueError, cv2.error):
                 timings['regressor_crop_preprocess_total'] += time.perf_counter() - _t_start
-                skipped_due_to_exception += 1
+                timings['num_skipped_crops'] += 1
                 continue
 
         timings['num_regressor_runs'] = len(regressor_input_batch_constructor)
@@ -372,35 +393,58 @@ def benchmarkable_detect3d(
                 if not current_batch_list: continue
                 
                 actual_batch_size = len(current_batch_list)
-                reg_batch_feed = None
-                
-                if regressor_model_type in ['pytorch_native', 'pytorch_compile_openvino']:
-                    reg_batch_feed = torch.stack(current_batch_list)
-                    if regressor_model_type == 'pytorch_native': reg_batch_feed = reg_batch_feed.to(device_pytorch)
-                    
-                elif regressor_model_type in ['onnx_openvino', 'ir_openvino']: 
-                    reg_batch_feed = np.stack(current_batch_list)  # Shape: (actual_batch_size, 3, 224, 224)
-                    
-                    # Pad incomplete batches to match model's expected batch size
-                    if actual_batch_size < regressor_batch_size:
-                        padding_needed = regressor_batch_size - actual_batch_size
-                        padding = np.zeros((padding_needed, *reg_batch_feed.shape[1:]), dtype=reg_batch_feed.dtype)
-                        reg_batch_feed = np.vstack([reg_batch_feed, padding])
-
-                _t_infer_start = time.perf_counter()
+                prepare_start = synchronized_time(timing_device)
+                dtype = np.uint8 if regressor_model_type == 'ir_openvino' else np.float32
+                expected_shape = (regressor_batch_size, 3, *img_size_regressor)
+                if regressor_buffer is None:
+                    regressor_buffer = np.empty(expected_shape, dtype=dtype)
+                if regressor_buffer.shape != expected_shape or regressor_buffer.dtype != dtype:
+                    raise ValueError("Regressor buffer has incorrect shape or dtype")
+                for batch_index, crop in enumerate(current_batch_list):
+                    regressor_buffer[batch_index] = crop.numpy() if isinstance(crop, torch.Tensor) else crop
+                regressor_buffer[actual_batch_size:] = 0
+                reg_batch_feed = regressor_buffer[:actual_batch_size] if dynamic_shapes else regressor_buffer
                 if regressor_model_type == 'pytorch_native':
-                    with torch.no_grad(): _, _, _ = regressor_model(reg_batch_feed)
-                elif regressor_model_type == 'pytorch_compile_openvino':
-                    with torch.no_grad(): _, _, _ = regressor_model(reg_batch_feed)
-                elif regressor_model_type in ['onnx_openvino', 'ir_openvino']:
-                    reg_input_name = regressor_model.input(0).any_name
-                    _ = regressor_model.infer_new_request({reg_input_name: reg_batch_feed})
-                    # Note: we only used actual_batch_size samples, the padding is discarded
-                    
-                batch_inference_time = time.perf_counter() - _t_infer_start
-                timings['regressor_inference_batch_total'] += batch_inference_time
+                    reg_batch_feed = torch.from_numpy(reg_batch_feed).to(device_pytorch)
+                timings['regressor_batch_prepare_total'] += synchronized_time(timing_device) - prepare_start
 
-    annotated_image = input_image_np.copy()
+                infer_start = synchronized_time(timing_device)
+                if regressor_model_type == 'pytorch_native':
+                    with torch.no_grad():
+                        batch_outputs = regressor_model(reg_batch_feed)
+                else:
+                    batch_outputs, latency = infer_openvino(regressor_model, reg_batch_feed, regressor_request)
+                    if latency is not None:
+                        timings['regressor_device_latency_total'] = timings.get('regressor_device_latency_total', 0.0) + latency
+                timings['regressor_inference_batch_total'] += synchronized_time(timing_device) - infer_start
+                timings['num_regressor_batches'] += 1
+
+                decode_start = synchronized_time(timing_device)
+                orient, conf, dimensions = [
+                    output.detach().cpu().numpy() if isinstance(output, torch.Tensor) else output
+                    for output in batch_outputs[:3]
+                ]
+                decoded = []
+                for batch_index in range(actual_batch_size):
+                    detected_obj, class_name, box_2d = crop_metadata[i + batch_index]
+                    best_bin = int(np.argmax(conf[batch_index]))
+                    direction = orient[batch_index, best_bin]
+                    alpha = np.arctan2(direction[1], direction[0]) + angle_bins[best_bin] - np.pi
+                    dim = dimensions[batch_index].copy()
+                    if class_averages is not None:
+                        dim += class_averages.get_item(class_name)
+                    decoded.append((detected_obj, box_2d, dim, alpha))
+                timings['regressor_output_decode_total'] += synchronized_time(timing_device) - decode_start
+                for detected_obj, box_2d, dim, alpha in decoded:
+                    geometry_start = time.perf_counter()
+                    location, _ = calc_location(dim, projection, box_2d, alpha, detected_obj.theta_ray)
+                    timings['geometry_total'] += time.perf_counter() - geometry_start
+                    drawing_start = time.perf_counter()
+                    plot_3d_box(annotated_image, projection, alpha + detected_obj.theta_ray, dim, location)
+                    timings['drawing_total'] += time.perf_counter() - drawing_start
+                    timings['num_3d_boxes'] += 1
+
+    timings['frame_wall_time'] = synchronized_time(timing_device) - frame_start
     return annotated_image, timings
 
 if __name__ == '__main__':

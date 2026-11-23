@@ -189,7 +189,6 @@ def process2D(image, track=True, device='cpu'):
     # Create a single-item dataset
     dataset = [(None, im, im0s, None, '')]
 
-    model = torch.compile(model, backend="openvino", options={"device": "CPU"})
     # Run inference
     model.warmup(imgsz=(1, 3, *imgsz), half=False)  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0

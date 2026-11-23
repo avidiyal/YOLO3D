@@ -26,7 +26,6 @@ from utils.torch_utils import select_device, time_sync
 import torch
 import torch.nn as nn
 from torchvision.models import resnet18, vgg11
-import openvino.torch
 import numpy as np
 
 from script.Dataset import generate_bins, DetectedObject
@@ -173,7 +172,6 @@ def detect2d(
     # Dataloader
     dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
 
-    model = torch.compile(model, backend="openvino", options={"device": "CPU"})
     # Run inference
     model.warmup(imgsz=(1, 3, *imgsz), half=False)  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0

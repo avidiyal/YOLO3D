@@ -1,119 +1,176 @@
-# OpenVINO and the Evolution of 3D Object Detection
+# YOLO3D with OpenVINO: Convert Once, Run on CPU, GPU, or NPU
 
+Say you're adding a vision feature to a desktop application. By the time your code starts, a local LLM may already be using the GPU, and a video call may be keeping the NPU busy with background blur. So where does your model run? With OpenVINO™, you don't have to decide up front.
 
-## Overview
+You convert the model once, and the device it runs on is just a string you pass when you load it. To show what that looks like in practice, we took [YOLO3D](https://github.com/ruhyadi/YOLO3D), a small 3D object detection pipeline built from two neural networks, and ran it on the CPU, GPU, and NPU of an Intel® Core™ Ultra AI PC without changing the code. You don't need that exact machine to follow along. The same steps work on any Intel CPU, GPU, or NPU that OpenVINO supports.
 
-The move from 2D detection to robust 3D perception is a pivotal step for robotics, AR, and autonomy. This post reframes OpenVINO not simply as a performance engine, but as an ecosystem and enabler in the evolution of 3D object detection — helping projects move from research prototypes to reliable, maintainable deployments on Intel platforms.
+3D perception is getting a lot of attention right now. In [this talk](https://www.youtube.com/watch?v=y8NtMZ7VGmU), Fei-Fei Li, often called the "godmother of AI," explains why spatial understanding is the next frontier for AI. As more of that work moves into robotics and other real-world systems, being able to deploy 3D models reliably on the hardware you have becomes important, and that's where OpenVINO's IR format and device flexibility help.
 
-We use the YOLO3D project (originally at `ruhyadi/YOLO3D`) and a  OpenVINO  API as a concrete case study to show how the OpenVINO stack supports interoperability, model lifecycle, multimodal fusion, and field-ready deployment practices that matter for robotics and systems engineering.
+**What you'll see:**
 
-**Outline**
+- One set of OpenVINO model files runs on the CPU, the GPU, and the NPU.
+- Switching devices is a one-word change, and the two models in the pipeline can each use a different device.
+- On an Intel Core Ultra processor (Series 2) AI PC, the full pipeline ran in real time on both the GPU and the NPU. The CPU runs it too, and it's the fallback you always have.¹
+- Quantizing the models to INT8 takes two commands.
 
-- **Interoperability & Portability**: Using ONNX and OpenVINO IR conversion tooling to keep research and deployment decoupled.
-- **Tooling & Numeric Stability**: Calibration, quantization, and deterministic kernels for spatial accuracy.
-- **Deployment Patterns**: Fallback APIs, sensor fusion, and field calibration workflows.
-- **Case Study**: Applying these ideas to `ruhyadi/YOLO3D` with an OpenVINO fallback.
-- **Practical Recommendations & Next Steps**: CI checks, calibration datasets, and multi‑sensor support.
+## How the Pipeline Works
 
-## Why Evolution Matters More Than Raw Performance
+YOLO3D is two small networks with some ordinary code between them, which is how a lot of real vision applications are built:
 
-Robotics teams face several non‑performance barriers when adopting 3D perception:
-- Sensor and data heterogeneity (lidar, stereo, RGB‑D)
-# OpenVINO-First 3D Perception for Robotics
+1. **YOLOv5s finds the objects.** It returns a 2D bounding box for each one.
+2. **A ResNet18-based regressor looks at each object crop.** It predicts which way the object is facing and how its size differs from the average for its class.
+3. **Geometry does the rest.** The code combines those predictions with the camera calibration to get 3D boxes, then draws them on the image.
 
-## TL;DR
+![Projected YOLO3D bounding boxes in a KITTI driving scene](https://raw.githubusercontent.com/avidiyal/YOLO3D/main/runs_xml/000.png)
 
-OpenVINO is the primary deployment artifact for 3D perception in robotics: convert checkpoints directly to OpenVINO IR, validate geometry/quantization with a small calibration set, and deploy the IR to edge devices. This short guide condenses the practical steps we used to move a YOLO3D pipeline into a production-ready flow.
+*Output of the OpenVINO pipeline on a scene from the [KITTI Vision Benchmark Suite](https://www.cvlibs.net/datasets/kitti/). The boxes are estimates from a single image, not depth measurements.*
 
-**Note:** Leading voices in AI are now explicitly moving into 3D perception. See this talk for context: https://www.youtube.com/watch?v=y8NtMZ7VGmU — the so-called "godmother of AI" outlines why spatial understanding is the next frontier. This shift reinforces our focus: reliable, geometry-preserving deployment (via OpenVINO IR) is critical for robotics and real-world systems.
+Having two models is what makes this a useful example, because later we put them on different devices. None of the steps below are specific to YOLO3D, so you can reuse them for your own models.
 
-## Why OpenVINO-First for Robotics
+## Step by Step: Convert, Quantize, and Run
 
+All you need to follow along is an Intel CPU, Git, and Python 3 (we used 3.12). If your system also has an Intel GPU or NPU, [install the drivers](https://docs.openvino.ai/2026/get-started/install-openvino/configurations.html) so OpenVINO can use them. An Intel Core Ultra AI PC has all three devices.
 
-## Minimal OpenVINO-First Workflow
+Run everything after step 1 from the `YOLO3D` folder. The commands are written for Linux. On Windows, use the alternatives in the comments. All other commands are single lines that work in Command Prompt and PowerShell.
 
-1. Export or keep your trained PyTorch checkpoint (`.pt`).
-2. Convert to OpenVINO IR with `ovc` or `convert_model()`.
-3. Validate numeric and geometric correctness on a calibration set.
-4. Deploy IR and run with OpenVINO Core.
+**1. Get the code and install the dependencies.**
 
-Conversion examples (recommended):
-
-```
-# CLI: convert PyTorch checkpoint to OpenVINO IR (FP16)
-ovc --framework pytorch --input_model weights/yolov5s.pt --output_dir weights/openvino --precision FP16
-```
-
-```
-# Python API: convert_model()
-from openvino.model_conversion import convert_model
-
-convert_model(
-	model='weights/yolov5s.pt',
-	output_dir='weights/openvino',
-	precision='FP16',
-	framework='pytorch'
-)
+```bash
+git clone https://github.com/avidiyal/YOLO3D.git
+cd YOLO3D
+python3 -m venv ov-yolo3d-env          # Windows: python -m venv ov-yolo3d-env
+source ov-yolo3d-env/bin/activate      # Windows: ov-yolo3d-env\Scripts\activate
+pip install -r requirements-cpu.txt
 ```
 
-## OpenVINO-First Inference Wrapper
+**2. Download the PyTorch checkpoints and convert them to OpenVINO.**
 
-Make OpenVINO the primary runtime in your stack. Provide a small wrapper that loads an IR and exposes a `predict()` API; fall back to a developer runtime only for local debugging.
+You only need to do this once.
 
-```
-from openvino.runtime import Core
-
-class OVModel:
-	def __init__(self, ir_xml):
-		core = Core()
-		model = core.read_model(ir_xml)
-		self.compiled = core.compile_model(model, device_name='CPU')
-
-	def predict(self, input_numpy):
-		return self.compiled(input_numpy)
+```bash
+python weights/get_weights.py
+python weights/convert_models.py
 ```
 
-Use this wrapper inside the 3D pipeline so that camera calibration and geometric postprocessing receive consistent outputs across devices.
+This writes `yolov5s.xml` and `resnet18.xml` to `weights/openvino/`, each with a matching `.bin` file.
 
-## What to Check for 3D Models
+**3. Optional: quantize the models to INT8.**
 
-- Preserve camera matrices and calibration files (e.g. `dataset/KITTI/calib_cam_to_cam.txt`).
-- Validate regression outputs (orientation, dimensions) after conversion using per-channel calibration data.
-- Capture end-to-end plots/visuals as part of CI to catch geometric regressions early.
+```bash
+python weights/quantize_yolo.py --ir weights/openvino/yolov5s.xml --images eval/image_2/ --output weights/openvino/yolov5s_int8.xml
 
-## Example: running a regressor IR with OpenVINO
-
-```
-from openvino.runtime import Core
-core = Core()
-regressor = core.read_model('weights/openvino/resnet18.xml')
-compiled = core.compile_model(regressor, 'CPU')
-res = compiled(input_tensor.numpy())
-orient = res[compiled.output(0)]
-conf = res[compiled.output(1)]
-dim = res[compiled.output(2)]
+python weights/quantize_resnet.py
 ```
 
-## KITTI example outputs
+That's all quantization takes: two commands and about a minute, with no retraining. [NNCF](https://github.com/openvinotoolkit/nncf) does the work. INT8 models can boost performance, with minimal accuracy loss. To keep this example quick, the YOLO command calibrates on only the few sample images in `eval/image_2`. For a real model, calibrate on a full, representative dataset. The ResNet script streams labeled KITTI images from Hugging Face for calibration, so it needs an internet connection. That data is only needed for quantization, not for inference. You'll find the INT8 models next to the originals as `yolov5s_int8.xml` and `resnet18_int8.xml`, and they run on every device. Steps 5 and 7 show how to use them.
 
-These images show 3D boxes after conversion and inference using the workflow above.
+**4. Check which devices OpenVINO can see.**
 
-![KITTI sample 000010](./runs_xml/000.png)
+```bash
+python -c "import openvino as ov; print(ov.Core().available_devices)"
+```
 
-![KITTI sample 000036](./runs_xml/001.png)
+Use the names exactly as they're printed. If the system has more than one GPU, they show up as `GPU.0`, `GPU.1`, and so on, and plain `GPU` means `GPU.0`.
 
-![KITTI sample 007091](./runs_xml/002.png)
+**5. Run the 3D pipeline on each device.**
 
-## Short Recommendations
+The `inference_openvino_xml.py` script is a quick demo of how to run inference with OpenVINO on the YOLO3D pipeline. By default it uses the images in `eval/image_2`. Run the script with `--help` to see all options.
 
-- Version the IR and treat it as the deployable binary.
-- Use `ovc` or `convert_model()` for conversion
-- Add a small calibration validation step in CI that checks coordinates and orientation tolerances.
+```bash
+python inference_scripts/inference_openvino_xml.py --device CPU --save_result --output_path output_cpu
 
+python inference_scripts/inference_openvino_xml.py --device GPU --save_result --output_path output_gpu
 
+python inference_scripts/inference_openvino_xml.py --device NPU --save_result --output_path output_npu
+```
 
+`--device` is the only thing that changes between these commands. Each run logs which device the models are on and saves the annotated images to its output folder. Compare the folders and you'll see the same objects detected on every device.
 
-## Closing — The 3D Moment
+If you did step 3, add the INT8 model paths to run the quantized models. This works on any device:
 
-The field is moving into 3D. Leaders in AI are already pointing to spatial understanding as the next frontier, and robotics teams must respond by making perception predictable and deployable. An OpenVINO-first workflow — convert, validate on a calibration set, and ship IR artifacts — turns research models into dependable robot behavior. Test on your sensors, share failure cases, and help build practical calibration suites that make 3D perception reliable in the real world.
+```bash
+python inference_scripts/inference_openvino_xml.py --device NPU --weights weights/openvino/yolov5s_int8.xml --reg_weights weights/openvino/resnet18_int8.xml --save_result --output_path output_npu_int8
+```
 
+**6. Split the pipeline across two devices.**
+
+```bash
+python inference_scripts/inference_openvino_xml.py --det_device GPU --reg_device NPU --save_result --output_path output_split
+```
+
+This puts the detector on the GPU and the 3D regressor on the NPU. Any two devices from step 4 will work.
+
+**7. Measure the speed on your hardware.**
+
+```bash
+python inference_scripts/benchmark_full_pipeline.py --pipeline_type ir_openvino --yolo_weights weights/openvino/yolov5s.xml --regressor_weights weights/openvino/resnet18.xml --dataset_path eval/image_2/ --calib_file eval/camera_cal/calib_cam_to_cam.txt --device NPU
+```
+
+The script prints the time spent in each stage and the overall frames per second. Change `--device` to compare devices. To measure the INT8 models from step 3, pass `yolov5s_int8.xml` and `resnet18_int8.xml` instead.
+
+## Balance the Work Across Devices
+
+Because the same model files compile for any device, you can put each part of the pipeline wherever there's spare capacity, and move it later without touching the rest of your application. For example:
+
+| What's happening on the system | Where to run the 3D pipeline |
+|---|---|
+| The GPU is busy with a local LLM, a game, or other graphics work | The NPU, or the NPU and CPU together |
+| The NPU is busy with video-call effects or other background AI | The GPU |
+| The system is on battery for a long session | The NPU, which is designed for sustained, low-power AI |
+| The CPU is busy with a software build or a video export | The GPU or the NPU |
+
+The detector and the regressor are separate models, so they don't have to share a device. This is what the split from step 6 looks like in code. Run it from the `YOLO3D` folder:
+
+```python
+import openvino as ov
+
+core = ov.Core()
+core.set_property({"CACHE_DIR": "model_cache"})  # reuse compiled models on later runs
+
+def load(path, shape, device):
+    model = core.read_model(path)
+    # static shapes work on every device, including the NPU
+    model.reshape({model.input(0): shape})
+    return core.compile_model(model, device)
+
+detector = load("weights/openvino/yolov5s.xml", [1, 3, 640, 640], "GPU")
+regressor = load("weights/openvino/resnet18.xml", [1, 3, 224, 224], "NPU")
+print(detector.get_property("EXECUTION_DEVICES"))
+print(regressor.get_property("EXECUTION_DEVICES"))
+```
+
+To move the regressor to the CPU, change `"NPU"` to `"CPU"`. Two more OpenVINO features help once you start moving models around:
+
+- **Model caching.** With `CACHE_DIR` set, OpenVINO saves each compiled model and reuses it the next time, so your application starts faster. See [model caching](https://docs.openvino.ai/2026/openvino-workflow/running-inference/optimize-inference/optimizing-latency/model-caching-overview.html).
+- **Automatic device selection.** If you pass `"AUTO:NPU,GPU,CPU"` as the device name, OpenVINO picks the first device in the list that's available. See [automatic device selection](https://docs.openvino.ai/2026/openvino-workflow/running-inference/inference-devices-and-modes/auto-device-selection.html).
+
+## Convert Once, Validate Everywhere
+
+The [conversion script](https://github.com/avidiyal/YOLO3D/blob/main/weights/convert_models.py) calls [`ov.convert_model`](https://docs.openvino.ai/2026/api/ie_python_api/_autosummary/openvino.convert_model.html) on each PyTorch model. The `.xml` and `.bin` files it writes are the only model files you need, whatever device you run on. For the regressor, the script also uses the OpenVINO [preprocessing API](https://docs.openvino.ai/2026/openvino-workflow/running-inference/optimize-inference/optimize-preprocessing.html) to move input conversion and normalization into the model, which means that the preprocessing runs on your chosen device as well.
+
+Don't expect bit-identical results across devices. By default, the GPU and NPU typically compute in 16-bit floating point, and the CPU typically uses 32-bit. In our runs, every device found the same objects, and the 3D boxes differed only slightly. To put numbers on it, the [accuracy evaluator](https://github.com/avidiyal/YOLO3D/blob/main/inference_scripts/accuracy.py) compares the original PyTorch model with the OpenVINO model on labeled KITTI images:
+
+```bash
+python inference_scripts/accuracy.py resnet --source-model weights/resnet18.pkl --openvino-model weights/openvino/resnet18.xml --hf-dataset nateraw/kitti --limit 100 --device NPU
+```
+
+Run the same check on the INT8 models before you rely on them. The [accuracy workflow](https://github.com/avidiyal/YOLO3D/blob/main/README_openvino.md#7-measure-source-and-openvino-accuracy) has the details.
+
+## Wrapping Up
+
+It took one conversion step and one API to run YOLO3D on three devices, and moving a model between them meant changing a string. That leaves you free to decide where vision runs based on what else the system is doing.
+
+- [Follow the steps above](#step-by-step-convert-quantize-and-run) and measure the pipeline on your own hardware.
+- Try the same approach with your own models. The [OpenVINO notebooks](https://github.com/openvinotoolkit/openvino_notebooks) have plenty of examples to start from.
+- Browse the code, conversion scripts, and benchmark scripts in the [YOLO3D repository](https://github.com/avidiyal/YOLO3D).
+
+---
+
+## Notices and Credits
+
+¹ Test configuration: Intel® Core™ Ultra 5 processor 236V with integrated Intel® Arc™ GPU and Intel® AI Boost NPU, 16 GB memory, Ubuntu 24.04, OpenVINO 2026.4.1, Intel NPU driver 1.38, Intel GPU compute runtime 26.40. The full pipeline was measured with `benchmark_full_pipeline.py` on the sample KITTI images in the repository, with the FP32 models. Real time means faster than the frame rate of the camera that recorded the KITTI driving data. Tested in November 2026. Performance varies by use, configuration and other factors. Learn more at [www.intel.com/PerformanceIndex](https://www.intel.com/PerformanceIndex).
+
+- YOLO3D implementation by [ruhyadi](https://github.com/ruhyadi/YOLO3D), based on *3D Bounding Box Estimation Using Deep Learning and Geometry* by [Mousavian et al.](https://arxiv.org/abs/1612.00496)
+- YOLOv5 by [Ultralytics](https://github.com/ultralytics/yolov5), licensed under GPL-3.0.
+- Example image from the [KITTI Vision Benchmark Suite](https://www.cvlibs.net/datasets/kitti/) by Geiger et al., licensed under CC BY-NC-SA 3.0.
+- Intel, the Intel logo, and other Intel marks are trademarks of Intel Corporation or its subsidiaries. Other names and brands may be claimed as the property of others.

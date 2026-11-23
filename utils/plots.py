@@ -55,14 +55,18 @@ def check_font(font='Arial.ttf', size=10):
     font = font if font.exists() else (CONFIG_DIR / font.name)
     try:
         return ImageFont.truetype(str(font) if font.exists() else font.name, size)
-    except Exception as e:  # download if missing
-        url = "https://ultralytics.com/assets/" + font.name
-        print(f'Downloading {url} to {font}...')
-        torch.hub.download_url_to_file(url, str(font), progress=False)
+    except Exception:  # download if missing
+        # ultralytics.com/assets/*.ttf now 308-redirects; assets moved to the GitHub releases mirror
+        url = "https://github.com/ultralytics/assets/releases/download/v0.0.0/" + font.name
         try:
+            print(f'Downloading {url} to {font}...')
+            torch.hub.download_url_to_file(url, str(font), progress=False)
             return ImageFont.truetype(str(font), size)
         except TypeError:
             check_requirements('Pillow>=8.4.0')  # known issue https://github.com/ultralytics/yolov5/issues/5374
+        except Exception as e:  # network unavailable, permissions, etc. - fall back to PIL's default font
+            print(f'WARNING: font download failed ({e}); falling back to default font')
+            return ImageFont.load_default()
 
 
 class Annotator:
