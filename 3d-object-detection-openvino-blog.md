@@ -62,7 +62,7 @@ python weights/quantize_yolo.py --ir weights/openvino/yolov5s.xml --images eval/
 python weights/quantize_resnet.py
 ```
 
-That's all quantization takes: two commands and about a minute, with no retraining. [NNCF](https://github.com/openvinotoolkit/nncf) does the work. INT8 models can boost performance, with minimal accuracy loss. You'll find them next to the originals as `yolov5s_int8.xml` and `resnet18_int8.xml`, and they run on every device. Steps 5 and 7 show how to use them.
+That's all quantization takes: two commands and about a minute, with no retraining. [NNCF](https://github.com/openvinotoolkit/nncf) does the work. INT8 models can boost performance, with minimal accuracy loss. To keep this example quick, the YOLO command calibrates on only the few sample images in `eval/image_2`. For a real model, calibrate on a full, representative dataset. The ResNet script streams labeled KITTI images from Hugging Face for calibration, so it needs an internet connection. That data is only needed for quantization, not for inference. You'll find the INT8 models next to the originals as `yolov5s_int8.xml` and `resnet18_int8.xml`, and they run on every device. Steps 5 and 7 show how to use them.
 
 **4. Check which devices OpenVINO can see.**
 

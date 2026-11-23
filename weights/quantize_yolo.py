@@ -2,12 +2,8 @@
 """
 Quantize an OpenVINO IR (XML) model to INT8 using NNCF (post-training).
 
-Usage example:
-  python quantize_yolo.py \
-    --ir weights/openvino/yolov5s.xml \
-    --images data/calib_images/ \
-    --output weights/openvino/yolov5s_int8.xml
-    
+Usage example (from the repository root):
+  python weights/quantize_yolo.py --ir weights/openvino/yolov5s.xml --images eval/image_2/ --output weights/openvino/yolov5s_int8.xml
 
 This script reads an OpenVINO IR, builds a simple calibration dataset
 from images in a folder, runs NNCF quantization, and writes the quantized IR.

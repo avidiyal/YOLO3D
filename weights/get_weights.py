@@ -1,4 +1,4 @@
-# Downloads model weights into the 'weights/' directory, whichever directory you run it from.
+# Downloads model weights into the 'weights/' directory.
 # Example usage from project root:
 # python weights/get_weights.py  # Downloads resnet18.pkl and yolov5s.pt
 # python weights/get_weights.py --regressor_model resnet18

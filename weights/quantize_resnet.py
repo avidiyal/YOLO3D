@@ -2,16 +2,16 @@
 """Quantize the ResNet OpenVINO IR with representative KITTI object crops.
 
 Example:
-    python inference_scripts/quantize_resnet.py --max-samples 300
+    python weights/quantize_resnet.py --max-samples 300
 
 NNCF calibration uses input tensors to measure typical activation ranges; it
 does not consume labels or optimize model weights. This ResNet expects
 224x224 object crops rather than full camera frames, so KITTI labels are used
-only to construct representative crops. The local KITTI format and Hugging
-Face nateraw/kitti are the datasets tested with this script. Other datasets
-need an adapter for their image/box schema and compatible crop preprocessing.
-The official nateraw/kitti test split has no labels; calibrate from the tail
-of its labeled train split, or supply crops obtained from a detector.
+only to construct representative crops. Calibration data is streamed from
+Hugging Face; nateraw/kitti is the tested dataset. Other datasets need an
+adapter for their image/box schema and compatible crop preprocessing. The
+nateraw/kitti test split has no labels, so calibration uses the tail of its
+labeled train split.
 
 INT8 uses 8-bit values and can reduce model size or improve inference speed,
 but may slightly change predictions. Compare against the original model on
@@ -86,7 +86,6 @@ def iter_calibration_batches(args):
 
     Labels only tell this script where objects are; NNCF receives the image
     tensors, not the labels. The baked IR normalizes these inputs internally.
-    Other datasets need adapters for image decoding and box conversion.
     """
     try:
         from datasets import load_dataset, load_dataset_builder

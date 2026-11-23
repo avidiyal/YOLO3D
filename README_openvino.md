@@ -13,7 +13,7 @@
    - For Intel GPU and NPU devices, make sure to [install appropriate device drivers](https://docs.openvino.ai/2026/get-started/install-openvino/configurations.html)
 
 ### 3. Download model weights
-   This step downloads pre-trained model weights using the `get_weights.py` script. It saves `resnet18.pkl` and `yolov5s.pt` into the `weights/` directory, whichever directory you run it from.
+   This step downloads pre-trained model weights using the `get_weights.py` script. It saves `resnet18.pkl` and `yolov5s.pt` into the `weights/` directory.
 
    - **Default behavior (downloads ResNet18 PKL and YOLOv5s PT):**
      ```bash
@@ -38,7 +38,7 @@
      ```bash
      python weights/quantize_yolo.py --ir weights/openvino/yolov5s.xml --images eval/image_2/ --output weights/openvino/yolov5s_int8.xml
      ```
-     This writes `yolov5s_int8.xml` / `yolov5s_int8.bin` to `weights/openvino/`.
+     This writes `yolov5s_int8.xml` / `yolov5s_int8.bin` to `weights/openvino/`. For demo purposes, this calibrates on only the few sample images in `eval/image_2/`. For a real model, use a full, representative dataset for calibration.
 
    - **Quantize ResNet18 regressor** (`weights/quantize_resnet.py`) with real labeled KITTI object crops streamed from Hugging Face. It reads `weights/openvino/resnet18.xml` and writes `weights/openvino/resnet18_int8.xml` by default:
      ```bash
@@ -75,7 +75,7 @@
        python inference_openvino_xml.py --device NPU --save_result --output_path ../output_npu
        python inference_openvino_xml.py --det_device GPU --reg_device NPU --save_result --output_path ../output_split
        ```
-       To verify the actual INT8 quantized models produce correct 3D detections (not just faster timings), point `--weights`/`--reg_weights` at the quantized files from step 5:
+       To check that the INT8 models from step 5 produce correct 3D detections, point `--weights`/`--reg_weights` at the quantized files:
        ```bash
        python inference_openvino_xml.py --weights ../weights/openvino/yolov5s_int8.xml --reg_weights ../weights/openvino/resnet18_int8.xml --save_result --output_path ../output_int8
        ```

@@ -6,7 +6,7 @@ All benchmark scripts are located in the `inference_scripts/` directory. They re
 
 **Prerequisites:**
 - Ensure you have followed the setup steps in `README_openvino.md`, including environment setup, dependency installation, and model downloading/conversion.
-- Use `weights/convert_models.py` to convert the source checkpoints directly to OpenVINO IR in `weights/openvino/`. It does not produce ONNX files. The optional ONNX benchmarks require separately exported ONNX models. (Use convert_models.py with `--onnx` to produce them).
+- Use `weights/convert_models.py` to convert the source checkpoints directly to OpenVINO IR in `weights/openvino/`. By default it does not produce ONNX files. The optional ONNX benchmarks need ONNX models: run `python weights/convert_models.py --onnx` to also export them to `weights/onnx/`.
 
 ## Full 3D Detection Pipeline Benchmark (`benchmark_full_pipeline.py`)
 
@@ -23,15 +23,13 @@ This script benchmarks in-memory frame processing: 2D detection, NMS, crop prepr
     - `--dataset_path`: Path to input images (e.g., `eval/image_2/`).
     - `--calib_file`: A calibration file containing `P2:` or `P_rect_02:`, or a directory with a matching `<image-stem>.txt` file for each image. Use `eval/calib/` with the sample images for per-image calibration.
     - `--img_size_yolo`, `--img_size_regressor`.
-    - `--regressor_batch_size`: Fixed crop batch size by default, or maximum crop batch size with `--dynamic-shapes`. Compare batch sizes on your target hardware rather than assuming the default of 16 is optimal.
-    - `--dynamic-shapes`: Opt into bounded dynamic crop batches (1 through `--regressor_batch_size`) for OpenVINO IR/ONNX models. Image dimensions and YOLO's single-frame batch remain fixed. Partial regressor batches run at their actual size, without padding, across all backends. A maximum of 1 naturally remains static. Without this flag, OpenVINO uses static shapes and all backends pad partial crop batches equally; only real crops are decoded and drawn. Shape support depends on the model and device; unsupported compilation fails rather than silently falling back to static shapes.
+    - `--regressor_batch_size`: Number of object crops per regressor inference (default 16), or the maximum with `--dynamic-shapes`. The best value depends on your hardware.
+    - `--dynamic-shapes`: Use a dynamic regressor batch size (1 to `--regressor_batch_size`) for OpenVINO IR/ONNX models instead of padding partial batches to a fixed size. CPU and GPU support dynamic shapes; NPU support is [limited](https://docs.openvino.ai/2026/openvino-workflow/running-inference/inference-devices-and-modes/npu-device.html#dynamic-shapes).
     - `--device`: Target device (CPU, GPU, NPU).
     - `--data`: Dataset YAML containing class names for OpenVINO models (default: `data/coco128.yaml`).
     - `--output_path`: Optionally save annotated measured frames outside the timed region.
-    - `--warmup_runs`, `--benchmark_runs`: Counts of individual frames, cycling through the preloaded dataset. The regressor is also warmed independently, even if warm-up frames have no eligible detections. Dynamic mode performs `--warmup_runs` regressor warm-ups at every batch size from 1 through `--regressor_batch_size`; static mode warms only the fixed batch size. Zero disables both kinds of warm-up.
-  - **Output:** Mean, median, and P95 frame wall-clock latency, FPS derived from total measured frame time, component timings, and separate counts of detections, crops, batches, skipped crops, and drawn 3D boxes. OpenVINO request latencies are reported separately and are not added again when computing FPS. A run with no eligible regressor crops warns that it measured detector-only work.
-
-  OpenVINO uses reusable requests and application-owned input tensors. Native CUDA timings synchronize the device. The IR regressor receives raw uint8 crops without redundant host normalization; the ONNX and PyTorch regressors receive normalized crops.
+    - `--warmup_runs`, `--benchmark_runs`: Number of warm-up and measured frames. The script cycles through the images in `--dataset_path`.
+  - **Output:** Mean, median, and P95 frame latency, overall FPS, the average time per pipeline stage, and the average number of detections and 3D boxes per frame.
 
 **Example Command (OpenVINO IR Pipeline):**
 ```bash
@@ -50,15 +48,14 @@ To benchmark dynamic batches, append `--dynamic-shapes` to an IR or ONNX command
 python inference_scripts/benchmark_full_pipeline.py --pipeline_type ir_openvino --yolo_weights weights/openvino/yolov5s.xml --regressor_weights weights/openvino/resnet18.xml --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --regressor_batch_size 4 --dynamic-shapes --warmup_runs 3 --benchmark_runs 10
 ```
 
-Compare backends using the same shape mode and maximum batch size. Static and dynamic modes can execute different amounts of padded work, so their FPS values are not like-for-like model-throughput measurements. The standalone `benchmark_openvino_ir.py` retains its existing `--static-shapes` option.
+Compare backends using the same shape mode and maximum batch size. Static mode pads partial batches, so static and dynamic results are not directly comparable.
 
 **Example Command (OpenVINO ONNX Pipeline):**
-This optional path requires separately exported YOLO and ResNet ONNX models; the default conversion step does not create them. Use convert_models.py with `--onnx` to create them.
+This optional path requires YOLO and ResNet ONNX models. `weights/convert_models.py` only creates them when you add the `--onnx` flag: `python weights/convert_models.py --onnx`.
 
 ```bash
 python inference_scripts/benchmark_full_pipeline.py --pipeline_type onnx_openvino --yolo_weights weights/onnx/yolov5s.onnx --yolo_cfg models/yolov5s.yaml --regressor_weights weights/onnx/resnet18.onnx --regressor_name resnet18 --dataset_path eval/image_2/ --calib_file eval/calib/ --device CPU --warmup_runs 3 --benchmark_runs 10
 ```
-(Adapt paths and `--pipeline_type` for other configurations like `pytorch_native`.)
 
 ### Benchmarking INT8 Quantized Models
 
@@ -93,7 +90,7 @@ Swap `--device CPU` for `GPU` or `NPU` to benchmark on other targets, exactly li
 
 ### 3. ONNX with OpenVINO Runtime (`benchmark_onnx.py`)
    - **Purpose:** Measures inference speed of an ONNX model using the OpenVINO Runtime.
-  - **Model Expected:** A separately exported ONNX model (`.onnx` file). The default `weights/convert_models.py` workflow produces IR only, so provide an existing ONNX model for this optional benchmark.
+  - **Model Expected:** An ONNX model (`.onnx` file). `weights/convert_models.py` produces IR only by default; add `--onnx` to also export ONNX models to `weights/onnx/`.
    - The optional `--dataset_path` argument can be used to specify a directory of images (e.g., `eval/image_2/`) or a single image file for benchmarking on real data. If not provided, the script uses randomly generated dummy data.
    - **Example Command:**
      ```bash

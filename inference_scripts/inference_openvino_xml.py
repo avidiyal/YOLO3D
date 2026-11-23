@@ -90,6 +90,10 @@ def detect3d(
             classes=[0, 2, 3, 5]
         )
 
+        # YOLO detects the COCO classes in --classes (default: person, car, motorcycle, bus).
+        # Only detections whose COCO name is also a KITTI class in script/class_averages.txt
+        # get a 3D box, so with the defaults only cars are passed to the regressor.
+        # benchmark_full_pipeline.py maps more COCO classes to KITTI classes, so it can regress more objects.
         for det in dets:
             if not averages.recognized_class(det.detected_class):
                 continue
@@ -110,7 +114,6 @@ def detect3d(
             conf = results[compiled_regressor.output(1)]
             dim = results[compiled_regressor.output(2)]
 
-            # No need for .cpu().data.numpy() - already NumPy arrays
             orient = orient[0, :, :]  
             conf = conf[0, :]
             dim = dim[0, :]

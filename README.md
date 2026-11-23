@@ -46,18 +46,42 @@ python get_weights.py --weights resnet18
 ## Inference
 For inference with pretrained model you can run code below. It can be run in conda env or docker container. 
 ```
-python inference.py --weights yolov5s.pt --source eval/image_2 --reg_weights weights/resnet18.pkl --model_select resnet18 --output_path runs/ --show_result --save_result
+python inference.py \
+    --weights yolov5s.pt \
+    --source eval/image_2 \
+    --reg_weights weights/resnet18.pkl \
+    --model_select resnet18 \
+    --output_path runs/ \
+    --show_result --save_result
 ```
 Inference can be run on Colab Notebook, please visit [this link](https://colab.research.google.com/drive/1vhgGRRDqHEqsrqZXBjBJHDFWJk9Pw0qZ?usp=sharing).
 
 ## Training
 YOLO3D model can be train with PyTorch or PyTorch Lightning. In order to train you need API KEY for [comet.ml](https://www.comet.ml) (visualize your training loss/accuracy). Follow comet.ml documentation to get API key.
 ```
-python train.py --epochs 10 --batch_size 32 --num_workers 2 --save_epoch 5 --train_path ./dataset/KITTI/training --model_path ./weights --select_model resnet18 --api_key xxx
+python train.py \
+    --epochs 10 \
+    --batch_size 32 \
+    --num_workers 2 \
+    --save_epoch 5 \
+    --train_path ./dataset/KITTI/training \
+    --model_path ./weights \
+    --select_model resnet18 \
+    --api_key xxx
 ```
 In order train with pytorch lightning run code below:
 ```
-!python train_lightning.py --train_path dataset/KITTI/training --checkpoint_path weights/checkpoints --model_select resnet18 --epochs 10 --batch_size 32 --num_workers 2 --gpu 1 --val_split 0.1 --model_path weights --api_key xxx
+!python train_lightning.py \
+    --train_path dataset/KITTI/training \
+    --checkpoint_path weights/checkpoints \
+    --model_select resnet18 \
+    --epochs 10 \
+    --batch_size 32 \
+    --num_workers 2 \
+    --gpu 1 \
+    --val_split 0.1 \
+    --model_path weights \
+    --api_key xxx
 ```
 
 ## Reference

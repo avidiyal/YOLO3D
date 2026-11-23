@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 def iter_benchmark_images(path, img_size):
-    """Load image-only datasets without importing PyTorch's training utilities."""
+    """Load images for benchmarking."""
     source = str(Path(path).resolve())
     if '*' in source:
         files = [Path(item) for item in sorted(glob.glob(source, recursive=True))]

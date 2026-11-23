@@ -180,7 +180,12 @@ def load_regressor_model(weights_path, model_name_str, device_str, model_type='p
         print(f"Error loading/compiling Regressor model ({model_type}): {e}", file=sys.stderr)
         return None
 
-# COCO to KITTI class name mapping
+# COCO to KITTI class name mapping.
+# YOLO detects all COCO classes unless --yolo_classes_to_detect is set. Detections are renamed to
+# KITTI classes with these mappings (person -> pedestrian, motorcycle -> cyclist, bus -> truck),
+# and only classes found in script/class_averages.txt (car, truck, pedestrian, cyclist, ...) are
+# passed to the regressor. inference_openvino_xml.py does not apply this mapping and only regresses
+# cars, so this benchmark can process more objects per frame than that demo.
 COCO_TO_KITTI_MAPPING = {
     0: 'pedestrian',     # person
     2: 'car',

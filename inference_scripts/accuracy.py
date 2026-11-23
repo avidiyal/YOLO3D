@@ -72,7 +72,6 @@ def iter_local_samples(dataset_dir, limit):
     """Yield images and parsed labels from a local KITTI split.
 
     Expected layout: ``image_2/<frame>.<ext>`` and ``label_2/<frame>.txt``.
-    Other local dataset layouts need an adapter.
     """
     image_dir = dataset_dir / "image_2"
     label_dir = dataset_dir / "label_2"
@@ -101,9 +100,7 @@ def iter_local_samples(dataset_dir, limit):
 def parse_huggingface_labels(labels):
     """Convert nateraw/kitti labels to the evaluator's internal format.
 
-    This adapter expects KITTI-style ``type``, ``bbox``, ``alpha``, and
-    ``dimensions`` fields. Other annotation schemas need a mapping for their
-    fields and class names before using these evaluation functions.
+    Expects KITTI-style ``type``, ``bbox``, ``alpha``, and ``dimensions`` fields.
     """
     return [
         {
@@ -423,7 +420,7 @@ def add_common_arguments(parser):
     dataset_source.add_argument("--dataset", type=Path, default=ROOT / "dataset/KITTI/training", help="Local KITTI split containing image_2 and label_2.")
     dataset_source.add_argument(
         "--hf-dataset",
-        help="Hugging Face dataset ID (tested with nateraw/kitti; other schemas need an adapter).",
+        help="Hugging Face dataset ID (tested with nateraw/kitti).",
     )
     parser.add_argument("--hf-split", default="train", help="Hugging Face split to stream.")
     parser.add_argument("--hf-image-column", default="image", help="Image column in the Hugging Face dataset.")
